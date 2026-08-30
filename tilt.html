@@ -1,0 +1,2245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tilt Collective – 30 Levels</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0b0b1a; overflow: hidden; color: #eee; }
+    canvas { display: block; }
+
+    #ui-host, #ui-client, #ui-hud, #ui-overlay { position: absolute; pointer-events: none; }
+    #ui-host, #ui-client { pointer-events: auto; }
+    #ui-hud, #ui-overlay { display: none; }
+
+    #minimap {
+      display: none;
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      width: 150px;
+      height: 150px;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 10px;
+      z-index: 100;
+      pointer-events: none;
+    }
+
+    #ui-host {
+      top: 20px; left: 20px;
+      background: rgba(0,0,0,0.75);
+      backdrop-filter: blur(6px);
+      padding: 14px 20px;
+      border-radius: 14px;
+      border: 1px solid #444;
+      min-width: 200px;
+      display: none;
+    }
+    #ui-host .title { font-size: 1.1rem; font-weight: 600; color: #f5b042; }
+    #ui-host .host-id {
+      font-family: monospace;
+      font-size: 1.3rem;
+      letter-spacing: 2px;
+      background: #1a1a2e;
+      padding: 4px 14px;
+      border-radius: 30px;
+      margin: 6px 0 8px 0;
+      color: #ffd966;
+      word-break: break-all;
+      border: 1px solid #555;
+      cursor: pointer;
+      user-select: all;
+      transition: border-color 0.2s;
+    }
+    #ui-host .host-id:hover { border-color: #f5b042; }
+    #ui-host .btn-start {
+      background: #f5b042;
+      border: none;
+      color: #111;
+      font-weight: bold;
+      padding: 8px 20px;
+      border-radius: 30px;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: 0.2s;
+      pointer-events: auto;
+      margin-top: 4px;
+    }
+    #ui-host .btn-start:hover:not(:disabled) { background: #ffc857; }
+    #ui-host .btn-start:disabled { opacity: 0.4; cursor: not-allowed; }
+    #ui-host .client-count { margin-top: 6px; font-size: 0.85rem; opacity: 0.8; }
+    #ui-host .host-levels {
+      display: none;
+      grid-template-columns: repeat(10, 1fr);
+      gap: 4px;
+      margin-top: 10px;
+    }
+    #ui-host .host-dot {
+      background: #2a2a3e;
+      color: #aaa;
+      border: 1px solid #444;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      font-size: 0.6rem;
+      font-weight: 600;
+      line-height: 1;
+      padding: 0;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      pointer-events: auto;
+    }
+    #ui-host .host-dot:hover { background: #f5b042; color: #111; }
+    #ui-host .host-dot.active { background: #f5b042; color: #111; border-color: #ff9d00; }
+
+    #ui-client {
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.8);
+      backdrop-filter: blur(6px);
+      padding: 10px 18px;
+      border-radius: 40px;
+      border: 1px solid #333;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: center;
+      pointer-events: auto;
+    }
+    #ui-client input {
+      background: #222;
+      border: 1px solid #555;
+      color: white;
+      padding: 6px 14px;
+      border-radius: 30px;
+      font-size: 0.9rem;
+      width: 160px;
+    }
+    #ui-client input:focus { outline: none; border-color: #f5b042; }
+    #ui-client button {
+      background: #f5b042;
+      border: none;
+      color: #111;
+      font-weight: bold;
+      padding: 6px 16px;
+      border-radius: 30px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    #ui-client button:hover:not(:disabled) { background: #ffc857; }
+    #ui-client button:disabled { opacity: 0.4; cursor: not-allowed; }
+    #ui-client .status { font-size: 0.85rem; opacity: 0.8; margin-left: 4px; }
+
+    #ui-hud {
+      top: 20px; right: 16px;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(4px);
+      padding: 8px 14px;
+      border-radius: 10px;
+      border: 1px solid #333;
+      text-align: right;
+      pointer-events: none;
+      display: none;
+      min-width: 140px;
+      font-size: 0.85rem;
+    }
+    #ui-hud .level { font-size: 1.1rem; font-weight: 600; }
+    #ui-hud .level span { color: #f5b042; }
+    #ui-hud .input-stats {
+      margin-top: 4px;
+      font-size: 0.75rem;
+      opacity: 0.9;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 1px;
+    }
+    #ui-hud .input-stats .stat-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      justify-content: flex-end;
+    }
+    #ui-hud .input-stats .stat-bar {
+      width: 50px;
+      height: 4px;
+      background: #2a2a3a;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    #ui-hud .input-stats .stat-bar .fill {
+      height: 100%;
+      width: 0%;
+      background: #f5b042;
+      transition: width 0.15s;
+    }
+    #ui-hud .progress { margin-top: 4px; font-size: 0.8rem; opacity: 0.8; }
+    #ui-hud .progress-bar {
+      width: 80px;
+      height: 4px;
+      background: #2a2a3a;
+      border-radius: 2px;
+      margin-top: 2px;
+      overflow: hidden;
+    }
+    #ui-hud .progress-bar .fill {
+      height: 100%;
+      width: 0%;
+      background: #4caf50;
+      transition: width 0.2s;
+    }
+    #ui-hud .hint { margin-top: 4px; font-size: 0.7rem; opacity: 0.5; }
+
+    #ui-overlay {
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(4px);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      pointer-events: none;
+      filter: none;
+    }
+    #ui-overlay .message {
+      font-size: 3rem;
+      font-weight: 700;
+      text-shadow: 0 0 30px rgba(255,200,50,0.4);
+      padding: 16px 32px;
+      background: rgba(0,0,0,0.5);
+      border-radius: 24px;
+      border: 1px solid #f5b042;
+    }
+    #ui-overlay .sub { font-size: 1rem; opacity: 0.8; margin-top: 8px; }
+
+    @media (max-width: 640px) {
+      #ui-host { left: 10px; right: 10px; min-width: unset; padding: 10px 14px; }
+      #ui-client { flex-direction: column; padding: 10px; width: 90%; }
+      #ui-client input { width: 100%; }
+      #ui-hud { top: 10px; right: 10px; padding: 6px 10px; min-width: unset; font-size: 0.75rem; }
+      #ui-hud .level { font-size: 0.95rem; }
+      #ui-hud .input-stats .stat-bar { width: 35px; }
+      #ui-overlay .message { font-size: 1.8rem; }
+      #minimap { width: 100px; height: 100px; bottom: 10px; left: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="ui-host">
+    <div class="title">🏮 <span style="color:#fff;">Host</span></div>
+    <div style="font-size:0.75rem; opacity:0.6; margin-top:2px;">Share this ID – click to copy:</div>
+    <div class="host-id" id="hostIdDisplay">connecting…</div>
+    <button class="btn-start" id="btnStart" disabled>▶ Start Game</button>
+    <div class="client-count" id="clientCount">👥 Connected: 0</div>
+    <div class="host-levels" id="hostLevels"></div>
+  </div>
+
+  <div id="ui-client">
+    <input type="text" id="peerIdInput" placeholder="Enter Host ID" />
+    <button id="connectBtn">Connect</button>
+    <span class="status" id="connectionStatus">⚪ Not connected</span>
+  </div>
+
+  <div id="ui-hud">
+    <div class="level">L<span id="levelDisplay">1</span>/30</div>
+    <div class="input-stats" id="inputStats">
+      <div class="stat-row"><span>⬆</span><div class="stat-bar"><div class="fill" id="statUp"></div></div><span id="pctUp">0%</span></div>
+      <div class="stat-row"><span>⬇</span><div class="stat-bar"><div class="fill" id="statDown"></div></div><span id="pctDown">0%</span></div>
+      <div class="stat-row"><span>⬅</span><div class="stat-bar"><div class="fill" id="statLeft"></div></div><span id="pctLeft">0%</span></div>
+      <div class="stat-row"><span>➡</span><div class="stat-bar"><div class="fill" id="statRight"></div></div><span id="pctRight">0%</span></div>
+    </div>
+    <div class="progress">👥 <span id="activeCount">0</span></div>
+    <div class="progress-bar"><div class="fill" id="activityFill"></div></div>
+    <div class="hint">⬆⬇⬅➡ / WASD</div>
+  </div>
+
+  <canvas id="minimap" width="150" height="150"></canvas>
+
+  <div id="ui-overlay">
+    <div class="message" id="overlayMsg">🌟 Level Complete!</div>
+    <div class="sub" id="overlaySub">Preparing next level…</div>
+  </div>
+
+  <script src="https://unpkg.com/three@0.157.0/build/three.min.js"></script>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+
+  <script>
+    // =========================================================================
+    // 0.  GLOBALS
+    // =========================================================================
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 10, 10);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.prepend(renderer.domElement);
+
+    const CONFIG = {
+      gravity: 22.0,
+      friction: 0.985,
+      maxTilt: 0.28,
+      smoothing: 0.12,
+      ballRadius: 0.25,
+      cellSize: 1.2,
+      wallHeight: 0.5,
+      winHoldTime: 1.0,
+      jumpBoost: 6.0,
+      totalLevels: 30,
+      cameraHeight: 6.0,
+      cameraFollowZ: 6.0,
+    };
+
+    let ballColor = 'neutral';
+
+    // =========================================================================
+    // 1.  TITLE SCREEN BUILD ("Tilt Collective" in Wall Blocks)
+    // =========================================================================
+    const titleGroup = new THREE.Group();
+    scene.add(titleGroup);
+    let titleRotOffset = 0; // user-controlled yaw offset (clamped)
+    let titleTiltOffset = 0; // user-controlled tilt offset (clamped)
+
+    // 5x7 Block font map
+    const fontData = {
+      'L': [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,1,1,1,1]],
+      'A': [[0,1,1,1,0],[1,0,0,0,1],[1,0,0,0,1],[1,1,1,1,1],[1,0,0,0,1],[1,0,0,0,1],[1,0,0,0,1]],
+      'B': [[1,1,1,1,0],[1,0,0,0,1],[1,0,0,0,1],[1,1,1,1,0],[1,0,0,0,1],[1,0,0,0,1],[1,1,1,1,0]],
+      'Y': [[1,0,0,0,1],[1,0,0,0,1],[0,1,0,1,0],[0,0,1,0,0],[0,0,1,0,0],[0,0,1,0,0],[0,0,1,0,0]],
+      'R': [[1,1,1,1,0],[1,0,0,0,1],[1,0,0,0,1],[1,1,1,1,0],[1,0,1,0,0],[1,0,0,1,0],[1,0,0,0,1]],
+      'I': [[1,1,1,1,1],[0,0,1,0,0],[0,0,1,0,0],[0,0,1,0,0],[0,0,1,0,0],[0,0,1,0,0],[1,1,1,1,1]],
+      'N': [[1,0,0,0,1],[1,1,0,0,1],[1,0,1,0,1],[1,0,0,1,1],[1,0,0,0,1],[1,0,0,0,1],[1,0,0,0,1]],
+      'T': [[1,1,1,1,1],[0,0,1,0,0],[0,0,1,0,0],[0,0,1,0,0],[0,0,1,0,0],[0,0,1,0,0],[0,0,1,0,0]],
+      'H': [[1,0,0,0,1],[1,0,0,0,1],[1,0,0,0,1],[1,1,1,1,1],[1,0,0,0,1],[1,0,0,0,1],[1,0,0,0,1]],
+      'C': [[0,1,1,1,0],[1,0,0,0,1],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,1],[0,1,1,1,0]],
+      'O': [[0,1,1,1,0],[1,0,0,0,1],[1,0,0,0,1],[1,0,0,0,1],[1,0,0,0,1],[1,0,0,0,1],[0,1,1,1,0]],
+      'E': [[1,1,1,1,1],[1,0,0,0,0],[1,0,0,0,0],[1,1,1,1,0],[1,0,0,0,0],[1,0,0,0,0],[1,1,1,1,1]],
+      'V': [[1,0,0,0,1],[1,0,0,0,1],[1,0,0,0,1],[0,1,0,1,0],[0,1,0,1,0],[0,0,1,0,0],[0,0,1,0,0]]
+    };
+
+    function buildTitle() {
+        const lines = [
+            { word: "TILT", cellSize: 0.26, spacing: 0.24 },
+            { word: "COLLECTIVE", cellSize: 0.13, spacing: 0.12 }
+        ];
+        const charHeight = 7;
+        const lineGap = 0.3;
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x8a7a5a, roughness: 0.7, metalness: 0.1 });
+
+        // Compute total stacked height so the block is centered vertically
+        let totalHeight = 0;
+        for (let i = 0; i < lines.length; i++) {
+            totalHeight += charHeight * lines[i].cellSize;
+            if (i < lines.length - 1) totalHeight += lineGap;
+        }
+
+        let cursorY = totalHeight / 2;
+
+        for (let li = 0; li < lines.length; li++) {
+            const line = lines[li];
+            const word = line.word;
+            const cellSize = line.cellSize;
+            const spacing = line.spacing;
+            const wordWidth = word.length * 5 * cellSize + (word.length - 1) * spacing;
+            const lineBottomY = cursorY - charHeight * cellSize;
+            let currentX = -wordWidth / 2;
+
+            for (let c = 0; c < word.length; c++) {
+                const matrix = fontData[word[c]];
+
+                for (let y = 0; y < charHeight; y++) {
+                    for (let x = 0; x < matrix[y].length; x++) {
+                        if (matrix[y][x] === 1) {
+                            const wall = new THREE.Mesh(
+                                new THREE.BoxGeometry(cellSize, cellSize, cellSize), 
+                                wallMat
+                            );
+                            const posX = currentX + (x * cellSize) + (cellSize / 2);
+                            const posY = lineBottomY + (charHeight - 1 - y) * cellSize + (cellSize / 2);
+
+                            wall.position.set(posX, posY, 0);
+                            wall.castShadow = true;
+                            wall.receiveShadow = true;
+                            titleGroup.add(wall);
+                        }
+                    }
+                }
+                currentX += (5 * cellSize) + spacing;
+            }
+            cursorY = lineBottomY - lineGap;
+        }
+        
+        // Position the title screen in the center of the view
+        titleGroup.position.y = 0;
+        titleGroup.rotation.x = -0.2;
+    }
+    buildTitle();
+
+    // Drag to rotate and tilt the title (clamped), only while the title is on screen
+    let isDraggingTitle = false, lastMouseX = 0, lastMouseY = 0;
+    renderer.domElement.addEventListener('mousedown', (e) => {
+      if (titleGroup.visible) {
+        isDraggingTitle = true;
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+      }
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (isDraggingTitle) {
+        const dx = e.clientX - lastMouseX;
+        const dy = e.clientY - lastMouseY;
+        titleRotOffset = Math.max(-0.6, Math.min(0.6, titleRotOffset + dx * 0.008));
+        titleTiltOffset = Math.max(-0.5, Math.min(0.5, titleTiltOffset + dy * 0.008));
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+      }
+    });
+    window.addEventListener('mouseup', () => { isDraggingTitle = false; });
+
+    // =========================================================================
+    // 2.  SEEDED RNG & MAZE
+    // =========================================================================
+    function mulberry32(a) {
+      return function() {
+        a |= 0; a = a + 0x6D2B79F5 | 0;
+        let t = Math.imul(a ^ a >>> 15, 1 | a);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
+
+    function getPath(grid, sx, sy, gx, gy) {
+      const size = grid.length;
+      const prev = Array(size).fill().map(() => Array(size).fill(null));
+      const visited = Array(size).fill().map(() => Array(size).fill(false));
+      const queue = [[sx, sy]];
+      visited[sy][sx] = true;
+
+      while(queue.length) {
+        const [cx, cy] = queue.shift();
+        if (cx === gx && cy === gy) break;
+        const dirs = [[0,-1],[0,1],[-1,0],[1,0]];
+        for (const [dx, dy] of dirs) {
+          const nx = cx + dx, ny = cy + dy;
+          if (nx >= 0 && nx < size && ny >= 0 && ny < size && !visited[ny][nx] && grid[ny][nx] === 0) {
+            visited[ny][nx] = true;
+            prev[ny][nx] = [cx, cy];
+            queue.push([nx, ny]);
+          }
+        }
+      }
+
+      const path = [];
+      let curr = [gx, gy];
+      while (curr) {
+        path.push(curr);
+        curr = prev[curr[1]][curr[0]];
+      }
+      return path.reverse();
+    }
+
+    function generateMaze(size, rng) {
+      const grid = Array(size).fill().map(() => Array(size).fill(1));
+      const visited = Array(size).fill().map(() => Array(size).fill(false));
+      function carve(cx, cy) {
+        visited[cy][cx] = true;
+        grid[cy][cx] = 0;
+        const dirs = [[0,-1],[0,1],[-1,0],[1,0]];
+        for (let d of dirs.sort(() => rng() - 0.5)) {
+          const nx = cx + d[0]*2, ny = cy + d[1]*2;
+          if (nx > 0 && nx < size-1 && ny > 0 && ny < size-1 && !visited[ny][nx]) {
+            grid[cy + d[1]][cx + d[0]] = 0;
+            carve(nx, ny);
+          }
+        }
+      }
+      carve(1,1);
+      grid[1][1] = 0;
+
+      let maxDist = 0;
+      let goalCell = [size-2, size-2];
+      const dist = Array(size).fill().map(() => Array(size).fill(-1));
+      const queue = [[1,1]];
+      dist[1][1] = 0;
+
+      while(queue.length > 0) {
+        const [cx, cy] = queue.shift();
+        const dirs = [[0,-1],[0,1],[-1,0],[1,0]];
+        for (const [dx, dy] of dirs) {
+          const nx = cx + dx;
+          const ny = cy + dy;
+          if (nx >= 0 && nx < size && ny >= 0 && ny < size && grid[ny][nx] === 0 && dist[ny][nx] === -1) {
+            dist[ny][nx] = dist[cy][cx] + 1;
+            if (dist[ny][nx] > maxDist) {
+              maxDist = dist[ny][nx];
+              goalCell = [nx, ny];
+            }
+            queue.push([nx, ny]);
+          }
+        }
+      }
+
+      grid[goalCell[1]][goalCell[0]] = 0;
+      return { grid, goalCell };
+    }
+
+    // =========================================================================
+    // 3.  MIDDAY SUN SKY & LIGHTS
+    // =========================================================================
+    function createSkyTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 2; canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+      const gradient = ctx.createLinearGradient(0, 0, 0, 512);
+      gradient.addColorStop(0.0, '#87CEEB');
+      gradient.addColorStop(0.5, '#87CEEB');
+      gradient.addColorStop(0.7, '#B0E0E6');
+      gradient.addColorStop(1.0, '#F0E68C');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, 2, 512);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.magFilter = THREE.LinearFilter;
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      return texture;
+    }
+
+    const skyGeo = new THREE.SphereGeometry(50, 32, 32);
+    const skyMat = new THREE.MeshBasicMaterial({ map: createSkyTexture(), side: THREE.BackSide });
+    scene.add(new THREE.Mesh(skyGeo, skyMat));
+
+    const ambient = new THREE.AmbientLight(0xffffff, 1.0);
+    scene.add(ambient);
+    const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+    sun.position.set(0, 10, 0);
+    sun.castShadow = true;
+    sun.shadow.mapSize.width = 1024;
+    sun.shadow.mapSize.height = 1024;
+    const d = 18;
+    sun.shadow.camera.left = -d; sun.shadow.camera.right = d;
+    sun.shadow.camera.top = d; sun.shadow.camera.bottom = -d;
+    sun.shadow.camera.near = 1; sun.shadow.camera.far = 35;
+    scene.add(sun);
+    const fill = new THREE.DirectionalLight(0xffffff, 0.4);
+    fill.position.set(6, 4, -5);
+    scene.add(fill);
+
+    const tableGroup = new THREE.Group();
+    scene.add(tableGroup);
+
+    // =========================================================================
+    // 4.  OPTIMIZED PARTICLE SYSTEM
+    // =========================================================================
+    function createSpriteTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 64;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+      gradient.addColorStop(0, 'rgba(255,255,255,1)');
+      gradient.addColorStop(0.15, 'rgba(255,255,255,1)');
+      gradient.addColorStop(0.5, 'rgba(255,255,255,0.8)');
+      gradient.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, 64, 64);
+      return new THREE.CanvasTexture(canvas);
+    }
+    const spriteTex = createSpriteTexture();
+
+    class ParticleSystem {
+      constructor(max = 5000) {
+        this.particles = [];
+        this.max = max;
+        this.geo = new THREE.BufferGeometry();
+        this.mat = new THREE.PointsMaterial({
+          map: spriteTex,
+          size: 0.2,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          transparent: true,
+          opacity: 0.95,
+          color: 0xffffff,
+        });
+        this.mesh = new THREE.Points(this.geo, this.mat);
+        this.mesh.frustumCulled = false;
+        scene.add(this.mesh);
+
+        this.positions = new Float32Array(max * 3);
+        this.colors = new Float32Array(max * 3);
+        this.sizes = new Float32Array(max);
+        this.lifetimes = new Float32Array(max);
+        this.velocities = new Float32Array(max * 3);
+        this.alive = new Uint8Array(max);
+        this.count = 0;
+
+        this.geo.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+        this.geo.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
+        this.geo.setAttribute('size', new THREE.BufferAttribute(this.sizes, 1));
+      }
+
+      emit(count, origin, color, spread, speed, life, sizeMul = 1) {
+        for (let n = 0; n < count; n++) {
+          if (this.count >= this.max) return;
+          let idx = -1;
+          for (let i = 0; i < this.max; i++) {
+            if (!this.alive[i]) { idx = i; break; }
+          }
+          if (idx === -1) return;
+
+          this.alive[idx] = 1;
+          this.count++;
+
+          const theta = Math.random() * Math.PI * 2;
+          const phi = Math.acos(2 * Math.random() - 1);
+          const r = spread * Math.cbrt(Math.random());
+          
+          this.positions[idx*3] = origin.x + r * Math.sin(theta) * Math.cos(phi);
+          this.positions[idx*3+1] = origin.y + r * Math.sin(theta) * Math.sin(phi);
+          this.positions[idx*3+2] = origin.z + r * Math.cos(phi);
+
+          const c = new THREE.Color(color);
+          this.colors[idx*3] = c.r;
+          this.colors[idx*3+1] = c.g;
+          this.colors[idx*3+2] = c.b;
+
+          this.sizes[idx] = (0.15 + Math.random() * 0.25) * sizeMul;
+          this.lifetimes[idx] = life;
+
+          this.velocities[idx*3] = (Math.random() - 0.5) * speed;
+          this.velocities[idx*3+1] = (Math.random() - 0.5) * speed;
+          this.velocities[idx*3+2] = (Math.random() - 0.5) * speed;
+        }
+        this.geo.attributes.position.needsUpdate = true;
+        this.geo.attributes.color.needsUpdate = true;
+        this.geo.attributes.size.needsUpdate = true;
+      }
+
+      update(dt) {
+        for (let i = 0; i < this.max; i++) {
+          if (!this.alive[i]) continue;
+          this.lifetimes[i] -= dt;
+          if (this.lifetimes[i] <= 0) {
+            this.alive[i] = 0;
+            this.count--;
+            continue;
+          }
+
+          const idx = i * 3;
+          this.positions[idx] += this.velocities[idx] * dt;
+          this.positions[idx+1] += this.velocities[idx+1] * dt;
+          this.positions[idx+2] += this.velocities[idx+2] * dt;
+
+          this.velocities[idx] *= 0.97;
+          this.velocities[idx+1] *= 0.97;
+          this.velocities[idx+2] *= 0.97;
+
+          const alpha = Math.max(0, this.lifetimes[i] / 1.0);
+          this.sizes[i] *= 0.98;
+        }
+        this.geo.attributes.position.needsUpdate = true;
+        this.geo.attributes.color.needsUpdate = true;
+        this.geo.attributes.size.needsUpdate = true;
+        this.geo.setDrawRange(0, this.count);
+      }
+    }
+
+    const particles = new ParticleSystem();
+
+    // =========================================================================
+    // 5.  LEVEL BUILDER & SERIALIZER
+    // =========================================================================
+    let levelData = {
+      walls: [], electricWalls: [], portals: [], jumpPads: [], barriers: [], colorSwitches: [],
+      startPos: new THREE.Vector3(0,0,0),
+      goalPos: new THREE.Vector3(0,0,0),
+      size: 0, goalMesh: null,
+      dual: false, mazeHalf: 0, viewHalf: 0, gapHalf: 0,
+    };
+    const levelGroup = new THREE.Group();
+    tableGroup.add(levelGroup);
+
+    function makeGridTexture() {
+      const s = 256;
+      const c = document.createElement('canvas');
+      c.width = s; c.height = s;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#f0f0f0';
+      ctx.fillRect(0, 0, s, s);
+      ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(2, 2, s - 4, s - 4);
+      ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(s/2, 0); ctx.lineTo(s/2, s); ctx.moveTo(0, s/2); ctx.lineTo(s, s/2); ctx.stroke();
+      const tex = new THREE.CanvasTexture(c);
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      return tex;
+    }
+    const gridTex = makeGridTexture();
+
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x8a7a5a, roughness: 0.7, metalness: 0.1 });
+    const electricMat = new THREE.MeshStandardMaterial({ color: 0xff2244, emissive: 0xff0044, emissiveIntensity: 0.6 });
+    const barrierMatBlue = new THREE.MeshStandardMaterial({ color: 0x2244ff, emissive: 0x0022aa, emissiveIntensity: 0.5 });
+    const colorDotMats = { blue: new THREE.MeshStandardMaterial({ color: 0x2244ff, emissive: 0x2244ff, emissiveIntensity: 0.7 }) };
+    const portalMat = new THREE.MeshStandardMaterial({ color: 0x44ff88, emissive: 0x00aa44, emissiveIntensity: 0.4 });
+    const jumpMat = new THREE.MeshStandardMaterial({ color: 0x44aaff, emissive: 0x0044aa, emissiveIntensity: 0.3 });
+    const floorMat = new THREE.MeshStandardMaterial({ map: gridTex, color: 0xffffff, roughness: 0.85, metalness: 0.05 });
+    const goalMat = new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0xffaa00, emissiveIntensity: 0.5 });
+
+    const floorMeshes = [];
+
+    function triggerParticles(type, pos, color = 0xffaa44) {
+      if (type === 'goal') {
+        particles.emit(80, pos, color, 0.8, 3.0, 2.0, 1.2);
+      } else if (type === 'portal') {
+        particles.emit(60, pos, color, 0.6, 3.0, 1.8, 1.0);
+      } else if (type === 'death') {
+        particles.emit(80, pos, 0xff4422, 1.2, 5.0, 2.0, 1.4);
+        particles.emit(60, pos, 0xff8800, 1.0, 4.0, 2.5, 1.2);
+      } else if (type === 'electric') {
+        particles.emit(100, pos, 0xff0044, 1.5, 6.0, 2.0, 1.6);
+        particles.emit(80, pos, 0xff8800, 1.2, 5.0, 2.5, 1.4);
+      } else if (type === 'switch') {
+        particles.emit(40, pos, color, 0.8, 4.0, 1.5, 1.0);
+      } else if (type === 'jump') {
+        particles.emit(40, pos, 0x44aaff, 0.4, 2.5, 1.2, 0.8);
+      }
+    }
+
+    // ---- shared level builder helpers ----
+    function clearLevelScene() {
+      while (levelGroup.children.length) levelGroup.remove(levelGroup.children[0]);
+      for (const f of floorMeshes) levelGroup.remove(f);
+      floorMeshes.length = 0;
+      levelData.walls = []; levelData.electricWalls = [];
+      levelData.portals = []; levelData.jumpPads = []; levelData.barriers = []; levelData.colorSwitches = [];
+    }
+
+    function levelSize(levelNum) {
+      let size;
+      if (levelNum <= 5) size = 5 + (levelNum - 1) * 2;
+      else if (levelNum <= 10) size = 13 + (levelNum - 6) * 2;
+      else if (levelNum <= 15) size = 17 + (levelNum - 11) * 2;
+      else if (levelNum <= 20) size = 21 + (levelNum - 16) * 2;
+      else size = 25;
+      if (size < 5) size = 5;
+      if (size > 25) size = 25;
+      if (size % 2 === 0) size++;
+      return size;
+    }
+
+    function makeRng(levelNum, variant) {
+      return mulberry32(12345 + levelNum * 777 + variant * 999983);
+    }
+
+    function reachable(grid, a, b, blocked) {
+      const size = grid.length;
+      const visited = Array(size).fill().map(() => Array(size).fill(false));
+      const queue = [[a[0], a[1]]];
+      visited[a[1]][a[0]] = true;
+      while (queue.length) {
+        const [cx, cy] = queue.shift();
+        if (cx === b[0] && cy === b[1]) return true;
+        const dirs = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+        for (const [dx, dy] of dirs) {
+          const nx = cx + dx, ny = cy + dy;
+          if (nx < 0 || nx >= size || ny < 0 || ny >= size) continue;
+          if (blocked && blocked[0] === nx && blocked[1] === ny) continue;
+          if (grid[ny][nx] === 1) continue;
+          if (visited[ny][nx]) continue;
+          visited[ny][nx] = true;
+          queue.push([nx, ny]);
+        }
+      }
+      return false;
+    }
+
+    function distToPath(path, r, c) {
+      let best = 1e9;
+      for (const [px, py] of path) {
+        const d = Math.abs(px - c) + Math.abs(py - r);
+        if (d < best) best = d;
+      }
+      return best;
+    }
+
+    function pickDetourCell(maze, rng, path, blockedCell, from, minFromDist, exclude) {
+      const size = maze.grid.length;
+      for (let i = 0; i < 800; i++) {
+        const r = 1 + Math.floor(rng() * (size - 2));
+        const c = 1 + Math.floor(rng() * (size - 2));
+        if (maze.grid[r][c] !== 0) continue;
+        if (r === 1 && c === 1) continue;
+        if (maze.goalCell[0] === c && maze.goalCell[1] === r) continue;
+        if (blockedCell && blockedCell[0] === c && blockedCell[1] === r) continue;
+        if (exclude && exclude.some(p => p[0] === c && p[1] === r)) continue;
+        if (path && path.some(p => p[0] === c && p[1] === r)) continue;
+        if (Math.abs(c - from[0]) + Math.abs(r - from[1]) < minFromDist) continue;
+        if (blockedCell && !reachable(maze.grid, from, [c, r], blockedCell)) continue;
+        return [c, r];
+      }
+      return null;
+    }
+
+    // East-most open cell on a maze row, kept reachable from the start without
+    // crossing the barrier (so a portal return always lands on the pre-barrier side).
+    function eastEdgeCell(maze, r, blockedCell) {
+      const size = maze.grid.length;
+      for (let c = size - 2; c >= 1; c--) {
+        if (maze.grid[r][c] !== 0) continue;
+        if (blockedCell && !reachable(maze.grid, [1, 1], [c, r], blockedCell)) continue;
+        return [c, r];
+      }
+      return null;
+    }
+    function westEdgeCell(maze, r) {
+      const size = maze.grid.length;
+      for (let c = 1; c <= size - 2; c++) {
+        if (maze.grid[r][c] === 0) return [c, r];
+      }
+      return null;
+    }
+    // A colour-dot detour just off the entry corridor — neat to find, no maze-wide hunt.
+    function pickSwitchDetour(maze, rng, from, lo, hi) {
+      const size = maze.grid.length;
+      const pool = [];
+      for (let r = 1; r <= size - 2; r++) {
+        for (let c = 1; c <= size - 2; c++) {
+          if (maze.grid[r][c] !== 0) continue;
+          if (r === 1 && c === 1) continue;
+          if (maze.goalCell[0] === c && maze.goalCell[1] === r) continue;
+          const d = Math.abs(c - from[0]) + Math.abs(r - from[1]);
+          if (d < lo || d > hi) continue;
+          pool.push([c, r]);
+        }
+      }
+      if (!pool.length) return null;
+      return pool[Math.floor(rng() * pool.length)];
+    }
+
+    function addFloor(cx, cz, floorSize) {
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(floorSize, floorSize), floorMat);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set(cx, -0.05, cz);
+      mesh.receiveShadow = true;
+      levelGroup.add(mesh);
+      floorMeshes.push(mesh);
+    }
+
+    function addPortalMesh(x, z, pair) {
+      const p = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.06, 12, 24), portalMat);
+      p.position.set(x, 0.1, z);
+      p.rotation.x = Math.PI / 2;
+      levelGroup.add(p);
+      const entry = { x, z, mesh: p, pair, lastUse: 0 };
+      levelData.portals.push(entry);
+      return entry;
+    }
+
+    function addSolidWall(x, z, mat, extra) {
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(CONFIG.cellSize, CONFIG.wallHeight, CONFIG.cellSize), mat);
+      wall.position.set(x, CONFIG.wallHeight / 2, z);
+      wall.castShadow = true;
+      wall.receiveShadow = true;
+      for (const k in extra) wall.userData[k] = extra[k];
+      levelGroup.add(wall);
+      levelData.walls.push(wall);
+      return wall;
+    }
+
+    function addColorDot(x, z, color) {
+      const mat = colorDotMats[color] || colorDotMats.blue;
+      const dot = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.05, 20), mat);
+      dot.position.set(x, 0.02, z);
+      levelGroup.add(dot);
+      const entry = { mesh: dot, x, z, color };
+      levelData.colorSwitches.push(entry);
+      return entry;
+    }
+
+    // Border openings for one maze island are ONLY ever cut at the END OF AN
+    // INTERSECTION ON THE WALL: where a route corridor terminates at the
+    // perimeter. Rolling down that corridor with momentum shoots the ball
+    // straight out through the opening; a turn pressed against the wall is the
+    // most dangerous, a straight dead-end into the wall the next.
+    function pickGapCells(maze, path, goalCell, count, rng, exclude) {
+      const size = maze.grid.length;
+      const gapSet = new Set();
+      if (count <= 0) return gapSet;
+
+      const idx = new Map();
+      for (let i = 0; i < path.length; i++) idx.set(path[i][1] + ',' + path[i][0], i);
+      const pathTurn = [];
+      for (let i = 0; i < path.length; i++) {
+        if (i < 1 || i >= path.length - 1) { pathTurn.push(false); continue; }
+        const a = path[i - 1], b = path[i], c = path[i + 1];
+        pathTurn.push((b[0] - a[0] !== c[0] - b[0]) || (b[1] - a[1] !== c[1] - b[1]));
+      }
+
+      const borderCells = [];
+      for (let row = 0; row < size; row++) {
+        for (let col = 0; col < size; col++) {
+          if (maze.grid[row][col] !== 1) continue;
+          if (!(row === 0 || row === size - 1 || col === 0 || col === size - 1)) continue;
+          if ((row === 1 && col === 0) || (row === 0 && col === 1)) continue;
+          borderCells.push({ row, col });
+        }
+      }
+
+      const scored = borderCells.map(b => {
+        // the interior cell this border slot opens onto
+        const ir = Math.min(Math.max(b.row, 1), size - 2);
+        const ic = Math.min(Math.max(b.col, 1), size - 2);
+        const iIdx = idx.has(ir + ',' + ic) ? idx.get(ir + ',' + ic) : -1;
+        const onTurn = iIdx >= 0 && pathTurn[iIdx];
+        const onPath = iIdx >= 0;
+        let s;
+        // The gap ONLY exists at the END OF AN INTERSECTION: where the corridor
+        // terminates at the perimeter (its interior neighbour is on the route).
+        if (onTurn) s = 12 + rng() * 2;          // corridor meets the wall and turns there = momentum hazard
+        else if (onPath) s = 5 + rng() * 2;      // corridor that dead-ends straight into the wall
+        else s = 0;                              // no corridor here → never eligible
+        if (exclude && exclude.some(c => Math.abs(c[1] - b.row) <= 1 && Math.abs(c[0] - b.col) <= 1)) s -= 100;
+        return { row: b.row, col: b.col, s };
+      });
+
+      scored.sort((a, b) => b.s - a.s);
+      for (const cand of scored) {
+        if (gapSet.size >= count) break;
+        if (cand.s <= 0) continue;
+        let tooClose = false;
+        for (const g of gapSet) {
+          const gp = g.split(',');
+          if (Math.abs(Number(gp[0]) - cand.row) <= 1 && Math.abs(Number(gp[1]) - cand.col) <= 1) {
+            tooClose = true;
+            break;
+          }
+        }
+        if (tooClose) continue;
+        gapSet.add(cand.row + ',' + cand.col);
+      }
+      return gapSet;
+    }
+
+    // HOST'S BUILDER
+    function buildLevel(levelNum) {
+      clearLevelScene();
+
+      const size = levelSize(levelNum);
+      const centerCol = (size - 1) / 2;
+      const cell = CONFIG.cellSize;
+      const mazeHalf = (size - 1) / 2 * cell;
+      const dual = levelNum >= 16;
+      const gapWidth = dual ? cell : 0;
+      const gapHalf = gapWidth / 2;
+      const viewHalf = dual ? 2 * mazeHalf + gapWidth : mazeHalf;
+
+      levelData.size = size;
+      levelData.mazeHalf = mazeHalf;
+      levelData.viewHalf = viewHalf;
+      levelData.gapHalf = gapHalf;
+      levelData.dual = dual;
+
+      const gapCount = levelNum <= 2 ? 0 : (levelNum <= 6 ? 1 : (levelNum <= 12 ? 2 : 3));
+      const electricActive = (levelNum >= 6 && levelNum <= 15) || levelNum >= 20;
+
+      // Build the maze island(s). Level 16+ gets a second island joined by portals.
+      const mazes = [];
+      for (let v = 0; v < (dual ? 2 : 1); v++) {
+        const m = generateMaze(size, makeRng(levelNum, v));
+        m.path = getPath(m.grid, 1, 1, m.goalCell[0], m.goalCell[1]);
+        m.centerX = dual ? (v === 0 ? -(mazeHalf + gapHalf) : (mazeHalf + gapHalf)) : 0;
+        mazes.push(m);
+      }
+      const mazeA = mazes[0];
+      const mazeB = mazes[1] || null;
+
+      function dist(r1, c1, r2, c2) { return Math.abs(r1 - r2) + Math.abs(c1 - c2); }
+
+      // Barrier blocks the winning path until the ball turns blue via the switch.
+      let barrierCell = null;
+      if (levelNum >= 10) {
+        const pi = Math.min(mazeA.path.length - 1, Math.floor(mazeA.path.length * 0.6));
+        barrierCell = mazeA.path[pi];
+      }
+
+      // Row-aligned portal gateways. Each pair sits on the SAME odd row (maze
+      // corridors only run on odd rows), at the gap-facing edges of the islands:
+      // A's inner (east) edge leases to B's inner (west) edge across the void, so
+      // stepping into a portal drops you straight across. A-side portals must be
+      // reachable from the start without passing the barrier, so coming home
+      // always lands on the pre-barrier side of the winning run.
+      const oddRowsNearCentre = [];
+      {
+        const c0 = centerCol % 2 === 1 ? centerCol : centerCol - 1;
+        const seen = new Set();
+        for (let k = 0; seen.size < size && k < size; k++) {
+          for (const r of [c0 - 2 * k, c0 + 2 * k]) {
+            if (r >= 1 && r <= size - 2 && !seen.has(r)) { seen.add(r); oddRowsNearCentre.push(r); }
+          }
+        }
+      }
+      let portalA = null, portalB = null, portalRow = null;
+      if (dual) {
+        // First pass: prefer gateways that really sit at the gap-facing border of
+        // each island, so jumping feels like stepping across the void.
+        for (const r of oddRowsNearCentre) {
+          const a = eastEdgeCell(mazeA, r, barrierCell);
+          const b = westEdgeCell(mazeB, r);
+          if (!a || !b) continue;
+          if (dist(1, 1, a[1], a[0]) <= 2) continue;
+          if (a[0] < size - 5 || b[0] > 4) continue;
+          portalA = a; portalB = b; portalRow = r;
+          break;
+        }
+        // Second pass: any shared-row gateway of OPEN cells where A stays
+        // pre-barrier (east A may be locked behind the barrier on some mazes).
+        if (!portalA) {
+          for (const r of oddRowsNearCentre) {
+            const a = eastEdgeCell(mazeA, r, barrierCell);
+            const b = westEdgeCell(mazeB, r);
+            if (!a || !b) continue;
+            if (dist(1, 1, a[1], a[0]) <= 2) continue;
+            portalA = a; portalB = b; portalRow = r;
+            break;
+          }
+        }
+        if (!portalA) {
+          // No shared-row pair: use the pre-barrier east cells of A, choosing the
+          // one farthest from the start so the crossing still feels like a journey.
+          let best = null, bestD = -1;
+          for (const r of oddRowsNearCentre) {
+            const a = eastEdgeCell(mazeA, r, barrierCell);
+            if (!a) continue;
+            const dd = Math.abs(a[0] - 1) + Math.abs(a[1] - 1);
+            if (dd > bestD) { bestD = dd; best = r; }
+          }
+          if (best != null) {
+            portalA = eastEdgeCell(mazeA, best, barrierCell);
+            portalB = westEdgeCell(mazeB, best);
+            portalRow = best;
+          }
+        }
+        if (!portalA) portalA = mazeA.path[Math.min(2, mazeA.path.length - 1)];
+        if (!portalB) {
+          for (let r = 1; r <= size - 2; r += 2) {
+            const b = westEdgeCell(mazeB, r);
+            if (b) { portalB = b; portalRow = portalRow || r; break; }
+          }
+        }
+        if (!portalB) portalB = [1, 1];
+      }
+
+      // Color switch: on dual levels it's a short twist off the B-side entry
+      // portal — cross the void, grab the blue dot, step straight back through.
+      let switchCell = null;
+      if (levelNum >= 10) {
+        const switchRng = makeRng(levelNum, 5);
+        if (dual) {
+          switchCell = portalB && pickSwitchDetour(mazeB, switchRng, portalB, 3, 6);
+          if (!switchCell && portalB) switchCell = pickSwitchDetour(mazeB, switchRng, portalB, 2, size);
+          if (!switchCell && portalB) {
+            for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+              const r = portalB[1] + dy, c = portalB[0] + dx;
+              if (mazeB.grid[r] && mazeB.grid[r][c] === 0 && !(r === 1 && c === 1) &&
+                  !(mazeB.goalCell[0] === c && mazeB.goalCell[1] === r)) { switchCell = [c, r]; break; }
+            }
+          }
+        } else {
+          switchCell = pickDetourCell(mazeA, switchRng, mazeA.path, barrierCell, [1, 1], 3, []);
+          if (!switchCell && barrierCell) {
+            switchCell = [barrierCell[0], barrierCell[1]];
+          }
+        }
+      }
+
+      // Gaps stay clear of the gadget corridors (barrier / switch / portals), so a
+      // rolling ball can never drop off while working the switch or stepping through.
+      const gapExclude = [];
+      if (barrierCell) gapExclude.push(barrierCell);
+      if (switchCell) gapExclude.push(switchCell);
+      if (portalA) gapExclude.push(portalA);
+      if (portalB) gapExclude.push(portalB);
+
+      levelData.startPos.set(mazeA.centerX + (1 - centerCol) * cell, 0, (1 - centerCol) * cell);
+      levelData.goalPos.set(mazeA.centerX + (mazeA.goalCell[0] - centerCol) * cell, 0, (mazeA.goalCell[1] - centerCol) * cell);
+
+      gridTex.repeat.set(Math.max(size, 4), Math.max(size, 4));
+      // Floor grows one cell wider than the maze so the boundary-wall outer
+      // faces (centered 'mazeHalf' out, 0.6 thick) land exactly on the slab
+      // edge - the base always matches the walls. On dual levels the slabs
+      // meet flush at the seam x=0, so the void only ever opens through the
+      // actual border-gap holes carved in corridors.
+      const floorSize = 2 * mazeHalf + cell;
+      if (dual) {
+        addFloor(-(mazeHalf + gapHalf), 0, floorSize);
+        addFloor(mazeHalf + gapHalf, 0, floorSize);
+      } else {
+        addFloor(0, 0, floorSize);
+      }
+
+      // Critical route per island, used to keep hazards off the line you must take.
+      mazeA.critPath = mazeA.path;
+      if (mazeB) {
+        mazeB.critPath = (portalB && switchCell)
+          ? getPath(mazeB.grid, portalB[0], portalB[1], switchCell[0], switchCell[1])
+          : mazeB.path;
+      }
+
+const islandDefs = dual ? [mazeA, mazeB] : [mazeA];
+    const wallPositions = [];
+    const carvedGaps = new Set();
+    for (let ix = 0; ix < islandDefs.length; ix++) {
+      const maze = islandDefs[ix];
+      const all = [];
+      for (let row = 0; row < size; row++) {
+        for (let col = 0; col < size; col++) {
+          if (maze.grid[row][col] !== 1) continue;
+          all.push({
+            x: maze.centerX + (col - centerCol) * cell,
+            z: (row - centerCol) * cell,
+            row, col,
+            maze,
+            key: (mazeB ? (maze === mazeB ? 'B:' : 'A:') : '') + row + ',' + col,
+          });
+        }
+      }
+      const gapTarget = dual ? (ix === 0 ? Math.ceil(gapCount / 2) : Math.floor(gapCount / 2)) : gapCount;
+      const excl = gapExclude.slice();
+      if (dual) excl.push(maze === mazeA ? portalA : portalB);
+      const gapSet = pickGapCells(maze, maze.critPath, maze.goalCell, gapTarget, makeRng(levelNum, 3 + ix), excl);
+      for (const g of gapSet) carvedGaps.add((mazeB ? (maze === mazeB ? 'B:' : 'A:') : '') + g);
+      for (const w of all) {
+        if (gapSet.has(w.row + ',' + w.col)) continue;
+        wallPositions.push(w);
+      }
+    }
+
+// Electric "exploding" sections follow a placement policy:
+  //  1. near the colour pickup (the walls around the pickup's approach),
+  //  2. at the END OF AN INTERSECTION / corner that was NOT carved out as a
+  //     gap (if the wall section wasn't removed, it explodes instead),
+  //  3. around the goal area in the harder later stages,
+  //  4. anywhere else — never forced onto the winning route.
+  const electricCells = new Set();
+  if (electricActive && wallPositions.length > 0) {
+    let count = Math.floor(2 + (levelNum - 6) * 1.5);
+    count = Math.min(count, Math.floor(wallPositions.length * (dual ? 0.2 : 0.3)));
+    const switchMaze = dual ? mazeB : mazeA;
+
+    // Route index per island (keyed exactly like w.key) so we can test whether a
+    // border cell's interior neighbour sits on the route, and whether it turns.
+    const routeIdx = new Map(), routeTurn = new Map();
+    function routeInfo(maze) {
+      const prefix = dual ? (maze === mazeB ? 'B:' : 'A:') : '';
+      const p = maze.critPath || maze.path;
+      for (let i = 0; i < p.length; i++) {
+        const turn = i >= 1 && i < p.length - 1 &&
+          ((p[i][0] - p[i-1][0] !== p[i+1][0] - p[i][0]) || (p[i][1] - p[i-1][1] !== p[i+1][1] - p[i][1]));
+        routeIdx.set(prefix + p[i][1] + ',' + p[i][0], i);
+        if (turn) routeTurn.set(prefix + p[i][1] + ',' + p[i][0], true);
+      }
+    }
+    routeInfo(mazeA);
+    if (mazeB) routeInfo(mazeB);
+
+    // Goal-area wall candidates must stay clear of the final approach runway:
+    // clearance is measured only against the last three cells before the goal,
+    // and the slot must sit within manhattan 3 of the goal pocket.
+    const goalHeld = (mazeA.critPath || mazeA.path);
+    const goalRunway = goalHeld.slice(-4, -1);
+
+    function mdist(r1, c1, r2, c2) { return Math.abs(r1 - r2) + Math.abs(c1 - c2); }
+
+    const rngE = makeRng(levelNum, 7);
+    const ranked = [];
+    for (const w of wallPositions) {
+      // --- never right on a gadget ---
+      if (Math.abs(1 - w.row) <= 1 && Math.abs(1 - w.col) <= 1) continue;
+      if (barrierCell && w.maze === mazeA && mdist(w.row, w.col, barrierCell[1], barrierCell[0]) <= 1) continue;
+      if (switchCell && w.maze === switchMaze && mdist(w.row, w.col, switchCell[1], switchCell[0]) <= 1) continue;
+      if (dual) {
+        if (portalA && w.maze === mazeA && mdist(w.row, w.col, portalA[1], portalA[0]) <= 1) continue;
+        if (portalB && w.maze === mazeB && mdist(w.row, w.col, portalB[1], portalB[0]) <= 1) continue;
+      }
+      const rp = w.maze.critPath || w.maze.path;
+      const distRoute = distToPath(rp, w.row, w.col);
+      const isBorder = w.row === 0 || w.row === size - 1 || w.col === 0 || w.col === size - 1;
+      const ir = Math.min(Math.max(w.row, 1), size - 2);
+      const ic = Math.min(Math.max(w.col, 1), size - 2);
+
+      let tier = -1;
+      // 1. near the colour pickup
+      if (switchCell && w.maze === switchMaze && distRoute >= 2) {
+        const dd = mdist(w.row, w.col, switchCell[1], switchCell[0]);
+        if (dd >= 2 && dd <= 4) tier = 1;
+      }
+      // 2. end of an intersection / corner that survived as a wall section
+      if (tier < 0 && isBorder && !carvedGaps.has(w.key)) {
+        const nKey = (dual ? (w.maze === mazeB ? 'B:' : 'A:') : '') + ir + ',' + ic;
+        if (routeIdx.has(nKey)) tier = routeTurn.has(nKey) ? 2 : 3;
+      }
+      // 3. around the goal area (later, harder stages)
+      if (tier < 0 && levelNum >= 15 && w.maze === mazeA && mdist(w.row, w.col, mazeA.goalCell[1], mazeA.goalCell[0]) <= 3) {
+        let onRunway = false;
+        for (const p of goalRunway) {
+          if (mdist(w.row, w.col, p[1], p[0]) < 2) { onRunway = true; break; }
+        }
+        if (!onRunway) tier = 4;
+      }
+      // 4. anywhere else but never forced onto the winning route
+      if (tier < 0 && distRoute >= 2) tier = 5;
+
+      if (tier >= 0) ranked.push({ w, tier, tb: rngE() });
+    }
+
+    // ALWAYS keep at least one END-OF-INTERSECTION electric when a candidate
+    // exists — it's the signature "kept wall section explodes" hazard, so tier-1
+    // pickup proximity must never starve it out.
+    {
+      const endPool = ranked.filter(e => e.tier === 2 || e.tier === 3);
+      endPool.sort((a, b) => a.tb - b.tb);
+      if (count > 0 && endPool.length) endPool[0].tier = -90;
+    }
+
+    // In the harder later stages RESERVE slots for the goal-area electrics so the
+    // tier priority can't crowd them out (level 15 gets one, 20+ grows to three).
+    if (levelNum >= 15) {
+      const goalReserve = levelNum >= 20 ? Math.min(3, Math.floor(1 + (levelNum - 20) * 0.5)) : 1;
+      const goalPool = ranked.filter(e => e.tier === 4);
+      goalPool.sort((a, b) => a.tb - b.tb);
+      for (let i = 0; i < goalReserve && i < goalPool.length; i++) goalPool[i].tier = -100;
+    }
+
+    ranked.sort((a, b) => a.tier - b.tier || a.tb - b.tb);
+    for (let i = 0; i < count && i < ranked.length; i++) electricCells.add(ranked[i].w.key);
+  }
+
+      for (const w of wallPositions) {
+        const isElectric = electricCells.has(w.key);
+        const wall = addSolidWall(w.x, w.z, isElectric ? electricMat : wallMat, { isElectric });
+        if (isElectric) levelData.electricWalls.push({ mesh: wall, x: w.x, z: w.z });
+      }
+
+      // Barrier wall blocks the corridor; the matching colour dot sits on the floor
+      // elsewhere. Rolling over the dot dyes the ball that colour, which opens
+      // the newly-unlocked colour wall section.
+      if (barrierCell) {
+        const bx = mazeA.centerX + (barrierCell[0] - centerCol) * cell;
+        const bz = (barrierCell[1] - centerCol) * cell;
+        const wall = addSolidWall(bx, bz, barrierMatBlue, { isBarrier: true, barrierColor: 'blue' });
+        levelData.barriers.push({ mesh: wall, x: bx, z: bz, color: 'blue' });
+      }
+
+      if (switchCell) {
+        const sm = dual ? mazeB : mazeA;
+        const sx = sm.centerX + (switchCell[0] - centerCol) * cell;
+        const sz = (switchCell[1] - centerCol) * cell;
+        addColorDot(sx, sz, 'blue');
+      }
+
+      // Portals (one pair normally, two pairs from level 27).
+      if (portalA && portalB) {
+        addPortalMesh(mazeA.centerX + (portalA[0] - centerCol) * cell, (portalA[1] - centerCol) * cell, 1);
+        addPortalMesh(mazeB.centerX + (portalB[0] - centerCol) * cell, (portalB[1] - centerCol) * cell, 1);
+        if (levelNum >= 27) {
+          // Second crossing runs the other way: A's outer (west) edge ↔ B's outer
+          // (east) edge, on a different row, keeping both crossings distinct.
+          let a2w = null, b2e = null;
+          for (const r of oddRowsNearCentre) {
+            if (r === portalRow) continue;
+            let aw = null;
+            for (let c = 1; c <= size - 2; c++) {
+              if (mazeA.grid[r][c] !== 0) continue;
+              if (barrierCell && !reachable(mazeA.grid, [1, 1], [c, r], barrierCell)) break;
+              aw = [c, r];
+              break;
+            }
+            if (!aw) continue;
+            let be = null;
+            for (let c = size - 2; c >= 1; c--) {
+              if (mazeB.grid[r][c] === 0) { be = [c, r]; break; }
+            }
+            if (!be) continue;
+            if (dist(aw[1], aw[0], portalA[1], portalA[0]) < 3) continue;
+            if (dist(be[1], be[0], portalB[1], portalB[0]) < 3) continue;
+            a2w = aw; b2e = be;
+            break;
+          }
+          if (a2w && b2e) {
+            addPortalMesh(mazeA.centerX + (a2w[0] - centerCol) * cell, (a2w[1] - centerCol) * cell, 2);
+            addPortalMesh(mazeB.centerX + (b2e[0] - centerCol) * cell, (b2e[1] - centerCol) * cell, 2);
+          }
+        }
+      }
+
+      // Goal
+      const goalMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.1, 20), goalMat);
+      goalMesh.position.set(levelData.goalPos.x, 0.05, levelData.goalPos.z);
+      levelGroup.add(goalMesh);
+      levelData.goalMesh = goalMesh;
+
+      const goalLight = new THREE.PointLight(0xffcc66, 1.4, 4.0);
+      goalLight.position.set(levelData.goalPos.x, 0.6, levelData.goalPos.z);
+      levelGroup.add(goalLight);
+
+      // Frame hugs the real footprint: full A-to-B width in X, but only the
+      // island depth in Z. On dual levels the frame must follow the island
+      // depth, not the wide cross span, or it balloons out into the void.
+      const frameW = viewHalf + 0.06;
+      const frameD = mazeHalf + 0.06;
+      const frameMat = new THREE.MeshStandardMaterial({ color: 0x3f4b7c, metalness: 0.45, roughness: 0.35 });
+      const tb = 0.14, th = 0.34;
+      const frameDefs = [
+        [2 * frameW + tb, th, tb, 0, -frameD],
+        [2 * frameW + tb, th, tb, 0, frameD],
+        [tb, th, 2 * frameD + tb, -frameW, 0],
+        [tb, th, 2 * frameD + tb, frameW, 0],
+      ];
+      for (const [w, h, d, fx, fz] of frameDefs) {
+        const f = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), frameMat);
+        f.position.set(fx, h / 2, fz);
+        f.castShadow = true; f.receiveShadow = true;
+        levelGroup.add(f);
+      }
+
+      ball.position.set(levelData.startPos.x, CONFIG.ballRadius, levelData.startPos.z);
+      velocity.set(0, 0, 0);
+      ballColor = 'neutral';
+      ball.material.color.set(0xccccdd);
+    }
+
+    // SERIALIZE HOST DATA TO SEND TO CLIENTS
+    function getLevelDataPacket() {
+        return {
+            type: 'levelData',
+            level: currentLevel,
+            startPos: { x: levelData.startPos.x, z: levelData.startPos.z },
+            goalPos: { x: levelData.goalPos.x, z: levelData.goalPos.z },
+            size: levelData.size,
+            mazeHalf: levelData.mazeHalf,
+            viewHalf: levelData.viewHalf,
+            gapHalf: levelData.gapHalf,
+            dual: levelData.dual,
+            walls: levelData.walls.map(w => ({
+                x: w.position.x, z: w.position.z,
+                isElectric: !!w.userData.isElectric,
+                isBarrier: !!w.userData.isBarrier,
+                barrierColor: w.userData.barrierColor || null
+            })),
+            colorSwitches: levelData.colorSwitches.map(d => ({ x: d.x, z: d.z, color: d.color })),
+            jumpPads: levelData.jumpPads.map(j => ({ x: j.x, z: j.z })),
+            portals: levelData.portals.map(p => ({ x: p.x, z: p.z, pair: p.pair }))
+        };
+    }
+
+    // CLIENT BUILDER (Receives data from Host)
+    function buildLevelFromData(data) {
+      clearLevelScene();
+
+      levelData.size = data.size;
+      levelData.mazeHalf = data.mazeHalf || ((data.size - 1) / 2) * CONFIG.cellSize;
+      levelData.viewHalf = data.viewHalf || levelData.mazeHalf;
+      levelData.gapHalf = data.gapHalf || 0;
+      levelData.dual = !!data.dual;
+      levelData.startPos.set(data.startPos.x, 0, data.startPos.z);
+      levelData.goalPos.set(data.goalPos.x, 0, data.goalPos.z);
+
+      // Floors (two islands on dual levels)
+      gridTex.repeat.set(Math.max(data.size, 4), Math.max(data.size, 4));
+      const floorSize = levelData.mazeHalf * 2 + CONFIG.cellSize;
+      if (levelData.dual) {
+        addFloor(-(levelData.mazeHalf + levelData.gapHalf), 0, floorSize);
+        addFloor(levelData.mazeHalf + levelData.gapHalf, 0, floorSize);
+      } else {
+        addFloor(0, 0, floorSize);
+      }
+
+      // Walls
+      for (let wData of data.walls) {
+        const mat = wData.isBarrier ? barrierMatBlue : (wData.isElectric ? electricMat : wallMat);
+        const wall = addSolidWall(wData.x, wData.z, mat, {
+          isElectric: !!wData.isElectric,
+          isBarrier: !!wData.isBarrier,
+          barrierColor: wData.barrierColor || null,
+        });
+        if (wData.isBarrier) levelData.barriers.push({ mesh: wall, x: wData.x, z: wData.z, color: wData.barrierColor });
+        if (wData.isElectric) levelData.electricWalls.push({ mesh: wall, x: wData.x, z: wData.z });
+      }
+
+      // Colour dots on the floor
+      for (let dData of data.colorSwitches) {
+        addColorDot(dData.x, dData.z, dData.color);
+      }
+
+      // Jump Pads
+      for (let jData of data.jumpPads) {
+        const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.05, 16), jumpMat);
+        pad.position.set(jData.x, 0.0, jData.z);
+        levelGroup.add(pad);
+        levelData.jumpPads.push({ x: jData.x, z: jData.z, radius: 0.35 });
+      }
+
+      // Portals
+      for (let pData of data.portals) {
+        addPortalMesh(pData.x, pData.z, pData.pair);
+      }
+
+      // Goal
+      const goalMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.1, 20), goalMat);
+      goalMesh.position.set(levelData.goalPos.x, 0.05, levelData.goalPos.z);
+      levelGroup.add(goalMesh);
+      levelData.goalMesh = goalMesh;
+
+      const goalLight = new THREE.PointLight(0xffcc66, 1.4, 4.0);
+      goalLight.position.set(levelData.goalPos.x, 0.6, levelData.goalPos.z);
+      levelGroup.add(goalLight);
+
+      // Frame hugs the real footprint: full A-to-B width in X, but only the
+      // island depth in Z. On dual levels the frame must follow the island
+      // depth, not the wide cross span, or it balloons out into the void.
+      const frameW = levelData.viewHalf + 0.06;
+      const frameD = levelData.mazeHalf + 0.06;
+      const frameMat = new THREE.MeshStandardMaterial({ color: 0x3f4b7c, metalness: 0.45, roughness: 0.35 });
+      const tb = 0.14, th = 0.34;
+      const frameDefs = [
+        [2 * frameW + tb, th, tb, 0, -frameD],
+        [2 * frameW + tb, th, tb, 0, frameD],
+        [tb, th, 2 * frameD + tb, -frameW, 0],
+        [tb, th, 2 * frameD + tb, frameW, 0],
+      ];
+      for (const [w, h, d, fx, fz] of frameDefs) {
+        const f = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), frameMat);
+        f.position.set(fx, h / 2, fz);
+        f.castShadow = true; f.receiveShadow = true;
+        levelGroup.add(f);
+      }
+
+      ball.position.set(levelData.startPos.x, CONFIG.ballRadius, levelData.startPos.z);
+      velocity.set(0, 0, 0);
+    }
+
+    // =========================================================================
+    // 6.  BALL, PHYSICS, CAMERA
+    // =========================================================================
+    const cubeRenderTarget = new THREE.WebGLCubeRenderTarget(128);
+    const cubeCamera = new THREE.CubeCamera(0.1, 100, cubeRenderTarget);
+
+    const ballMat = new THREE.MeshStandardMaterial({
+      color: 0xccccdd,
+      metalness: 0.95,
+      roughness: 0.1,
+      envMap: cubeRenderTarget.texture,
+      envMapIntensity: 1.2,
+    });
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(CONFIG.ballRadius, 32, 32), ballMat);
+    ball.castShadow = true;
+    titleGroup.add(ball);
+    ball.scale.set(4, 4, 4);
+    ball.position.set(0, 3.2, 0);
+    ball.rotation.y = 0.8;
+
+    const ballLight = new THREE.PointLight(0x88aaff, 1.2, 6);
+    ballLight.position.set(0, 4.4, 0);
+    titleGroup.add(ballLight);
+
+    let velocity = new THREE.Vector3(0,0,0);
+    let currentRotX = 0, currentRotZ = 0;
+    let winTimer = 0;
+    let transitioning = false;
+    let gameActive = false;
+    let currentLevel = 1;
+    const totalLevels = CONFIG.totalLevels;
+    let frameCount = 0;
+
+    const minimapCanvas = document.getElementById('minimap');
+    const minimapCtx = minimapCanvas.getContext('2d');
+
+    function prepareGameBall() {
+      // Return the ball (and its light) to the board once the title screen ends
+      if (ball.parent !== tableGroup) {
+        titleGroup.remove(ball);
+        titleGroup.remove(ballLight);
+        tableGroup.add(ball);
+        tableGroup.add(ballLight);
+      }
+      ball.scale.set(1, 1, 1);
+      ball.rotation.set(0, 0, 0);
+      ballLight.position.set(0, 0.5, 0);
+    }
+
+    function resetBall() {
+      ball.position.set(levelData.startPos.x, CONFIG.ballRadius, levelData.startPos.z);
+      velocity.set(0, 0, 0);
+      ballColor = 'neutral';
+      ball.material.color.set(0xccccdd);
+    }
+
+    function physicsUpdate(dt) {
+      if (!gameActive) return;
+      if (transitioning) return;
+      const tiltX = currentRotX;
+      const tiltZ = currentRotZ;
+      const ax = -CONFIG.gravity * Math.sin(tiltZ);
+      const az = CONFIG.gravity * Math.sin(tiltX);
+      velocity.x += ax * dt;
+      velocity.z += az * dt;
+      velocity.multiplyScalar(Math.pow(CONFIG.friction, dt * 60));
+
+      for (let j of levelData.jumpPads) {
+        const dx = ball.position.x - j.x;
+        const dz = ball.position.z - j.z;
+        if (dx*dx + dz*dz < (0.35 + CONFIG.ballRadius) * (0.35 + CONFIG.ballRadius)) {
+          if (velocity.y < 1) {
+            velocity.y = CONFIG.jumpBoost;
+            triggerParticles('jump', ball.position);
+          }
+        }
+      }
+
+      ball.position.x += velocity.x * dt;
+      ball.position.z += velocity.z * dt;
+      ball.position.y += velocity.y * dt;
+
+      const r = CONFIG.ballRadius;
+      const bX = ball.position.x, bZ = ball.position.z;
+      // Off-maze = past the border of the whole footprint, or (dual levels) in
+      // the void gap between the two islands.
+      const offMaze = levelData.dual
+        ? (Math.abs(bZ) > levelData.mazeHalf || Math.abs(bX) > levelData.viewHalf || Math.abs(bX) < levelData.gapHalf)
+        : (Math.abs(bX) > levelData.mazeHalf || Math.abs(bZ) > levelData.mazeHalf);
+
+      if (offMaze) {
+        // Past the border walls (through a gap): no floor here, fall into the void
+        velocity.y = Math.min(velocity.y, -9);
+      } else {
+        if (ball.position.y < CONFIG.ballRadius) {
+          ball.position.y = CONFIG.ballRadius;
+          velocity.y *= -0.2;
+          if (Math.abs(velocity.y) < 0.1) velocity.y = 0;
+        }
+      }
+      if (ball.position.y < -6) {
+        triggerParticles('death', ball.position);
+        resetBall();
+        showOverlay('💀 Rolled off the maze!', 'Mind the gaps in the walls!', 1.4);
+        return;
+      }
+
+      for (let i = levelData.walls.length - 1; i >= 0; i--) {
+        const wall = levelData.walls[i];
+        const wPos = wall.position;
+        const halfCell = CONFIG.cellSize/2;
+        const dx = ball.position.x - wPos.x;
+        const dz = ball.position.z - wPos.z;
+        if (Math.abs(dx) < halfCell + r && Math.abs(dz) < halfCell + r) {
+          const overlapX = halfCell + r - Math.abs(dx);
+          const overlapZ = halfCell + r - Math.abs(dz);
+
+          let canPass = false;
+
+          if (wall.userData.isElectric) {
+            canPass = true; // touching an electric wall = explosion
+          }
+          else if (wall.userData.isBarrier) {
+            if (ballColor === wall.userData.barrierColor) {
+              canPass = true;
+            }
+          }
+
+          if (!canPass) {
+            if (overlapX < overlapZ) {
+              ball.position.x += Math.sign(dx) * overlapX;
+              velocity.x *= -0.2;
+            } else {
+              ball.position.z += Math.sign(dz) * overlapZ;
+              velocity.z *= -0.2;
+            }
+          }
+
+          if (canPass) {
+            if (wall.userData.isElectric) {
+              levelGroup.remove(wall);
+              levelData.walls.splice(i, 1);
+              triggerParticles('electric', wPos);
+              resetBall();
+              showOverlay('⚡ BOOM!', 'Electric wall exploded!', 1.2);
+              return;
+            }
+            else if (wall.userData.isBarrier) {
+              triggerParticles('switch', wPos, 0x2244ff);
+            }
+          }
+        }
+      }
+
+      // Colour dots: rolling over a dot dyes the ball that colour (never blocks).
+      for (const dot of levelData.colorSwitches) {
+        const dx = ball.position.x - dot.x;
+        const dz = ball.position.z - dot.z;
+        if (dx*dx + dz*dz < (0.32 + r) * (0.32 + r)) {
+          if (ballColor !== dot.color) {
+            ballColor = dot.color;
+            ball.material.color.set(dot.color === 'blue' ? 0x2244ff : 0xccccdd);
+            triggerParticles('switch', ball.position, dot.color === 'blue' ? 0x2244ff : 0x888888);
+          }
+        }
+      }
+
+      const nowMs = performance.now();
+      for (let p of levelData.portals) {
+        // After a crossing both portals of the pair stay quiet for 5s, so a
+        // player who lingers on the pad isn't bounced straight back.
+        const portalCooldownMs = 5000;
+        if (nowMs - (p.lastUse || 0) < portalCooldownMs) continue;
+        const dx = ball.position.x - p.x;
+        const dz = ball.position.z - p.z;
+        if (dx*dx + dz*dz < (0.3 + r) * (0.3 + r)) {
+          const pair = levelData.portals.filter(q => q.pair === p.pair && q !== p);
+          if (pair.length === 1) {
+            const dest = pair[0];
+            p.lastUse = nowMs; dest.lastUse = nowMs;
+            triggerParticles('portal', ball.position, 0x44ff88);
+            ball.position.set(dest.x, CONFIG.ballRadius, dest.z);
+            velocity.multiplyScalar(0.5);
+            // Snap the camera straight to the destination so a crossing feels like
+            // stepping across the void, not a slow swing through empty space. Use
+            // the rendered (world) position so the tilt-offset ball is centered.
+            ball.updateWorldMatrix(true, false);
+            const destW = ball.getWorldPosition(new THREE.Vector3());
+            const camH = CONFIG.cameraHeight;
+            const camF = CONFIG.cameraFollowZ;
+            camera.position.set(destW.x, destW.y + camH, destW.z + camF);
+            camera.lookAt(destW.x, destW.y, destW.z);
+            triggerParticles('portal', ball.position, 0x44ff88);
+          }
+        }
+      }
+
+      const goalDist = Math.hypot(ball.position.x - levelData.goalPos.x, ball.position.z - levelData.goalPos.z);
+      if (goalDist < 0.6 && !transitioning) {
+        winTimer += dt;
+        if (winTimer >= CONFIG.winHoldTime) {
+          winTimer = 0;
+          if (currentLevel < totalLevels) {
+            const completed = currentLevel;
+            transitioning = true;
+            const msg = '🌟 Level ' + completed + ' Complete!';
+            const sub = 'Preparing Level ' + (completed + 1) + '…';
+            showOverlay(msg, sub, 9999);
+            for (let pid in connections) {
+              connections[pid].conn.send({ type: 'transition', msg: msg, sub: sub });
+            }
+            setTimeout(() => {
+              currentLevel = completed + 1;
+              buildLevel(currentLevel);
+              transitioning = false;
+              sendLevelData();
+              updateHUD();
+              hideOverlay();
+              if (typeof window.paintHostDots === 'function') window.paintHostDots();
+            }, 1200);
+          } else {
+            showOverlay('🏆 You mastered Tilt Collective!', 'Congratulations, everyone!', 9999);
+            gameActive = false;
+          }
+        }
+      } else {
+        winTimer = 0;
+      }
+
+      ballLight.position.copy(ball.position);
+      ballLight.position.y += 0.5;
+    }
+
+    function updateCamera() {
+      if (!ball) return;
+      // The board (and ball) tilt around the world origin, so the RENDERED ball
+      // is the rotated world position, not our local physics coordinates. Track
+      // the world position so tilting never makes the ball drift toward/away
+      // from the lens (which reads as the camera zooming in/out on far islands).
+      const ballWorld = ball.getWorldPosition(new THREE.Vector3());
+      const h = CONFIG.cameraHeight;
+      const fz = CONFIG.cameraFollowZ;
+      const cameraTarget = new THREE.Vector3(
+        ballWorld.x,
+        ballWorld.y + h,
+        ballWorld.z + fz
+      );
+      camera.position.lerp(cameraTarget, 0.1);
+      // While the title is up, frame the ball + title together in the vertical center
+      const focusY = titleGroup.visible
+        ? (ballWorld.y + CONFIG.ballRadius * 4 + titleGroup.position.y - 1.55) / 2
+        : ballWorld.y;
+      camera.lookAt(new THREE.Vector3(ballWorld.x, focusY, ballWorld.z));
+    }
+
+    // =========================================================================
+    // 7.  UI HELPERS & MINIMAP
+    // =========================================================================
+    const overlay = document.getElementById('ui-overlay');
+    const overlayMsg = document.getElementById('overlayMsg');
+    const overlaySub = document.getElementById('overlaySub');
+    let overlayTimeout = null;
+
+    function showOverlay(msg, sub, duration) {
+      overlay.style.display = 'flex';
+      overlayMsg.textContent = msg;
+      overlaySub.textContent = sub || '';
+      if (overlayTimeout) clearTimeout(overlayTimeout);
+      if (duration && duration < 9999) {
+        overlayTimeout = setTimeout(() => hideOverlay(), duration * 1000);
+      }
+    }
+    function hideOverlay() {
+      overlay.style.display = 'none';
+      if (overlayTimeout) { clearTimeout(overlayTimeout); overlayTimeout = null; }
+    }
+    function updateHUD() {
+      document.getElementById('levelDisplay').textContent = currentLevel;
+    }
+    function updateHUDStats(pct) {
+      if (!pct) return;
+      document.getElementById('pctUp').textContent = pct.up + '%';
+      document.getElementById('pctDown').textContent = pct.down + '%';
+      document.getElementById('pctLeft').textContent = pct.left + '%';
+      document.getElementById('pctRight').textContent = pct.right + '%';
+      document.getElementById('statUp').style.width = pct.up + '%';
+      document.getElementById('statDown').style.width = pct.down + '%';
+      document.getElementById('statLeft').style.width = pct.left + '%';
+      document.getElementById('statRight').style.width = pct.right + '%';
+      document.getElementById('activeCount').textContent = pct.active;
+      const fill = document.getElementById('activityFill');
+      fill.style.width = pct.total > 0 ? (pct.active / pct.total * 100) + '%' : '0%';
+    }
+
+    function drawMinimap() {
+      const w = 150;
+      const h = 150;
+      minimapCtx.clearRect(0, 0, w, h);
+
+      if (!levelData.goalMesh) return;
+
+      const bound = levelData.viewHalf || (levelData.size / 2) * CONFIG.cellSize;
+      const scale = 60 / bound; 
+
+      minimapCtx.fillStyle = "rgba(255,255,255,0.4)";
+      for (const wall of levelData.walls) {
+        const x = wall.position.x * scale + (w/2);
+        const z = wall.position.z * scale + (h/2);
+        const s = 3;
+        minimapCtx.fillRect(x - s/2, z - s/2, s, s);
+      }
+
+      minimapCtx.fillStyle = "#44ff88";
+      for (const portal of levelData.portals) {
+        minimapCtx.beginPath();
+        minimapCtx.arc(portal.x * scale + (w/2), portal.z * scale + (h/2), 2.5, 0, 2 * Math.PI);
+        minimapCtx.fill();
+      }
+
+      const gx = levelData.goalPos.x * scale + (w/2);
+      const gy = levelData.goalPos.z * scale + (h/2);
+      minimapCtx.fillStyle = "yellow";
+      minimapCtx.beginPath();
+      minimapCtx.arc(gx, gy, 4, 0, 2 * Math.PI);
+      minimapCtx.fill();
+
+      minimapCtx.fillStyle = "#2244ff";
+      for (const dot of levelData.colorSwitches) {
+        minimapCtx.beginPath();
+        minimapCtx.arc(dot.x * scale + (w/2), dot.z * scale + (h/2), 2, 0, 2 * Math.PI);
+        minimapCtx.fill();
+      }
+
+      const bx = ball.position.x * scale + (w/2);
+      const by = ball.position.z * scale + (h/2);
+      minimapCtx.fillStyle = ballColor === 'blue' ? "#2244ff" : "purple";
+      minimapCtx.beginPath();
+      minimapCtx.arc(bx, by, 4, 0, 2 * Math.PI);
+      minimapCtx.fill();
+    }
+
+    // =========================================================================
+    // 8. NETWORKING
+    // =========================================================================
+    function keyDir(e) {
+      const c = e.code || '';
+      switch (c) {
+        case 'ArrowUp': case 'KeyW': return 'up';
+        case 'ArrowDown': case 'KeyS': return 'down';
+        case 'ArrowLeft': case 'KeyA': return 'left';
+        case 'ArrowRight': case 'KeyD': return 'right';
+        default: return '';
+      }
+    }
+    function fallbackCopy(text) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch (e) {}
+      document.body.removeChild(ta);
+    }
+    const isHost = new URLSearchParams(window.location.search).get('host') === 'true';
+    let peer = null;
+    let connections = {};
+    let hostKeys = { up: false, down: false, left: false, right: false };
+    let gameStarted = false;
+
+    const hostPanel = document.getElementById('ui-host');
+    const clientPanel = document.getElementById('ui-client');
+    const hostIdDisplay = document.getElementById('hostIdDisplay');
+    const clientCountEl = document.getElementById('clientCount');
+    const btnStart = document.getElementById('btnStart');
+    const peerIdInput = document.getElementById('peerIdInput');
+    const connectBtn = document.getElementById('connectBtn');
+    const connectionStatus = document.getElementById('connectionStatus');
+    const hudPanel = document.getElementById('ui-hud');
+
+    if (isHost) {
+      hostPanel.style.display = 'block';
+      clientPanel.style.display = 'none';
+
+      function randomGameId() {
+        return String(Math.floor(100000 + Math.random() * 900000));
+      }
+      function initHostPeer() {
+        peer = new Peer(randomGameId());
+        peer.on('open', (id) => {
+          hostIdDisplay.textContent = id;
+          connectionStatus.textContent = '✅ Host ready';
+        });
+        peer.on('error', (err) => {
+          console.error('Host peer error:', err);
+          if (err.type === 'unavailable-id') {
+            peer.destroy();
+            setTimeout(initHostPeer, 250);
+          } else {
+            connectionStatus.textContent = '⚠️ Server problem';
+          }
+        });
+      }
+      initHostPeer();
+
+      hostIdDisplay.addEventListener('click', () => {
+        const id = hostIdDisplay.textContent;
+        if (!id || id.indexOf('connecting') !== -1) return;
+        const flash = () => {
+          const prev = hostIdDisplay.textContent;
+          hostIdDisplay.textContent = '✅ Copied!';
+          setTimeout(() => { hostIdDisplay.textContent = prev; }, 1200);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(id).then(flash).catch(() => { fallbackCopy(id); flash(); });
+        } else {
+          fallbackCopy(id);
+          flash();
+        }
+      });
+      peer.on('connection', (conn) => {
+        connections[conn.peer] = { conn, keys: { up: false, down: false, left: false, right: false } };
+        updateClientCount();
+        conn.on('data', (data) => {
+          if (data.type === 'keys') {
+            if (!connections[conn.peer]) {
+              connections[conn.peer] = { conn, keys: { up: false, down: false, left: false, right: false } };
+              updateClientCount();
+            }
+            connections[conn.peer].keys = data.keys;
+          }
+        });
+        conn.on('close', () => {
+          delete connections[conn.peer];
+          updateClientCount();
+        });
+      });
+
+      btnStart.addEventListener('click', () => {
+        if (Object.keys(connections).length === 0) return;
+        gameStarted = true;
+        gameActive = true;
+        transitioning = false;
+        hudPanel.style.display = 'block';
+        minimapCanvas.style.display = 'block';
+        btnStart.disabled = true;
+        btnStart.textContent = '▶ Playing';
+        
+        // Hide Title screen
+        titleGroup.visible = false;
+        prepareGameBall();
+        
+        // Build level and send it
+        currentLevel = 1;
+        buildLevel(currentLevel);
+        sendLevelData();
+
+        updateHUD();
+        hideOverlay();
+      });
+
+      // Hidden level-selector (testing aid): click the "Host" title 11 times to
+      // toggle the level dots. Each dot jumps this session to that level and
+      // broadcasts it to every connected client.
+      const hostLevels = document.getElementById('hostLevels');
+      const hostDots = [];
+      for (let i = 1; i <= 30; i++) {
+        const d = document.createElement('button');
+        d.type = 'button';
+        d.className = 'host-dot';
+        d.title = 'Jump to level ' + i;
+        d.textContent = i;
+        d.addEventListener('click', () => {
+          if (!gameActive || transitioning) return;
+          transitioning = false;
+          currentLevel = i;
+          buildLevel(currentLevel);
+          sendLevelData();
+          updateHUD();
+          hideOverlay();
+          paintHostDots();
+        });
+        hostLevels.appendChild(d);
+        hostDots.push(d);
+      }
+      function paintHostDots() {
+        hostDots.forEach((d, idx) => d.classList.toggle('active', idx + 1 === currentLevel));
+      }
+      window.paintHostDots = paintHostDots;
+      let titleClickCount = 0;
+      const hostTitle = document.querySelector('#ui-host .title');
+      if (hostTitle) {
+        hostTitle.addEventListener('click', () => {
+          titleClickCount++;
+          if (titleClickCount >= 11) {
+            titleClickCount = 0;
+            hostLevels.style.display = hostLevels.style.display === 'grid' ? 'none' : 'grid';
+          }
+        });
+      }
+
+      function sendLevelData() {
+        const data = getLevelDataPacket();
+        for (let pid in connections) {
+          connections[pid].conn.send(data);
+        }
+      }
+
+      function updateClientCount() {
+        const count = Object.keys(connections).length;
+        clientCountEl.textContent = `👥 Connected: ${count}`;
+        btnStart.disabled = (count === 0);
+      }
+
+      document.addEventListener('keydown', (e) => {
+        if (!gameActive) return;
+        const dir = keyDir(e);
+        if (!dir) return;
+        e.preventDefault();
+        hostKeys[dir] = true;
+      });
+      document.addEventListener('keyup', (e) => {
+        const dir = keyDir(e);
+        if (!dir) return;
+        e.preventDefault();
+        hostKeys[dir] = false;
+      });
+
+      let lastTime = performance.now();
+      let hostStats = null;
+
+      function hostLoop() {
+        const now = performance.now();
+        const dt = Math.min((now - lastTime) / 1000, 0.05);
+        lastTime = now;
+
+        if (gameActive) {
+          let up = 0, down = 0, left = 0, right = 0;
+          for (let pid in connections) {
+            const k = connections[pid].keys;
+            if (k.up) up++;
+            if (k.down) down++;
+            if (k.left) left++;
+            if (k.right) right++;
+          }
+          if (hostKeys.up) up++;
+          if (hostKeys.down) down++;
+          if (hostKeys.left) left++;
+          if (hostKeys.right) right++;
+          const totalPlayers = Object.keys(connections).length + 1;
+          const total = up + down + left + right;
+          const pctUp = total > 0 ? Math.round(up/total*100) : 0;
+          const pctDown = total > 0 ? Math.round(down/total*100) : 0;
+          const pctLeft = total > 0 ? Math.round(left/total*100) : 0;
+          const pctRight = total > 0 ? Math.round(right/total*100) : 0;
+
+          const activeCount = up + down + left + right;
+          if (activeCount > 0) {
+            const avgX = (right - left) / activeCount;
+            const avgZ = (down - up) / activeCount;
+            const targetRotX = avgZ * CONFIG.maxTilt;
+            const targetRotZ = -avgX * CONFIG.maxTilt;
+            currentRotX += (targetRotX - currentRotX) * CONFIG.smoothing;
+            currentRotZ += (targetRotZ - currentRotZ) * CONFIG.smoothing;
+          } else {
+            currentRotX *= 0.95;
+            currentRotZ *= 0.95;
+          }
+          tableGroup.rotation.x = currentRotX;
+          tableGroup.rotation.z = currentRotZ;
+          physicsUpdate(dt);
+
+          let active = 0;
+          for (let pid in connections) {
+            const k = connections[pid].keys;
+            if (k.up || k.down || k.left || k.right) active++;
+          }
+          if (hostKeys.up || hostKeys.down || hostKeys.left || hostKeys.right) active++;
+          hostStats = { up: pctUp, down: pctDown, left: pctLeft, right: pctRight, active: active, total: totalPlayers };
+          updateHUDStats(hostStats);
+        }
+
+        // Title faces the camera (yaw only, stays upright), plus clamped mouse rotation/tilt
+        if (titleGroup.visible) {
+            titleGroup.rotation.y = Math.atan2(
+                camera.position.x - titleGroup.position.x,
+                camera.position.z - titleGroup.position.z
+            ) + titleRotOffset;
+            titleGroup.rotation.x = -0.2 + titleTiltOffset;
+            ball.rotation.y += 0.015;
+        }
+
+        frameCount++;
+        if (frameCount % 2 === 0) {
+          const ballWorld = new THREE.Vector3();
+          ball.getWorldPosition(ballWorld);
+          cubeCamera.position.copy(ballWorld);
+          const wasVisible = ball.visible;
+          ball.visible = false;
+          cubeCamera.update(renderer, scene);
+          ball.visible = wasVisible;
+        }
+        particles.update(1/60);
+
+        if (frameCount % 2 === 0) {
+          broadcastState();
+        }
+
+        renderer.render(scene, camera);
+        updateCamera();
+        drawMinimap();
+
+        requestAnimationFrame(hostLoop);
+      }
+
+      function broadcastState(overrideData = null) {
+        let state;
+        if (overrideData) {
+            state = overrideData;
+        } else {
+            state = {
+              type: 'state',
+              ballX: ball.position.x,
+              ballY: ball.position.y,
+              ballZ: ball.position.z,
+              rotX: currentRotX,
+              rotZ: currentRotZ,
+              level: currentLevel,
+              gameActive: gameActive,
+              ballColor: ballColor,
+              stats: hostStats,
+            };
+        }
+        for (let pid in connections) {
+          connections[pid].conn.send(state);
+        }
+      }
+
+      hostLoop();
+
+    } else {
+      // ---- CLIENT ----
+      hostPanel.style.display = 'none';
+      clientPanel.style.display = 'flex';
+      peerIdInput.focus();
+
+      // Enter in the host-ID box connects (same as clicking Connect)
+      peerIdInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          connectBtn.click();
+        }
+      });
+
+      // SMOOTHING VARIABLES
+      let targetPos = new THREE.Vector3(0, CONFIG.ballRadius, 0);
+      let targetRotX = 0, targetRotZ = 0;
+
+      let clientPeer = new Peer();
+      let hostConn = null;
+      let connected = false;
+
+      clientPeer.on('open', () => {
+        connectionStatus.textContent = '🔗 Enter Host ID';
+      });
+
+      connectBtn.addEventListener('click', () => {
+        const id = peerIdInput.value.trim();
+        if (!id) return;
+        if (hostConn) { hostConn.close(); hostConn = null; }
+        const conn = clientPeer.connect(id, { reliable: true });
+        hostConn = conn;
+        conn.on('open', () => {
+          connected = true;
+          peerIdInput.style.display = 'none';
+          connectBtn.style.display = 'none';
+          connectionStatus.textContent = '✅ Connected – waiting for host to start…';
+          sendKeys();
+        });
+        conn.on('data', (data) => {
+          // --- LEVEL DATA (host started) ---
+          if (data.type === 'levelData') {
+            currentLevel = data.level;
+            buildLevelFromData(data);
+            hudPanel.style.display = 'block';
+            minimapCanvas.style.display = 'block';
+            updateHUD();
+            hideOverlay();
+            titleGroup.visible = false;
+            prepareGameBall();
+            connectionStatus.textContent = '✅ Connected – Playing';
+          }
+          // --- TRANSITION (level complete) ---
+          else if (data.type === 'transition') {
+            showOverlay(data.msg, data.sub, 9999);
+          }
+          // --- STATE ---
+          else if (data.type === 'state') {
+            targetPos.x = data.ballX;
+            targetPos.y = data.ballY || CONFIG.ballRadius;
+            targetPos.z = data.ballZ;
+            targetRotX = data.rotX;
+            targetRotZ = data.rotZ;
+            
+            if (data.ballColor) {
+              ballColor = data.ballColor;
+              if (ballColor === 'blue') ball.material.color.set(0x2244ff);
+              else ball.material.color.set(0xccccdd);
+            }
+
+            // If host starts game from title and we haven't gotten maze yet
+            gameActive = data.gameActive;
+            if (data.stats) updateHUDStats(data.stats);
+            if (data.gameActive) {
+              hudPanel.style.display = 'block';
+              minimapCanvas.style.display = 'block';
+            }
+            if (connected) {
+              connectionStatus.textContent = gameActive ? '✅ Connected – Playing' : '✅ Connected – waiting for host to start…';
+            }
+          }
+        });
+        conn.on('close', () => {
+          connected = false;
+          peerIdInput.style.display = '';
+          connectBtn.style.display = '';
+          peerIdInput.disabled = false;
+          connectBtn.disabled = false;
+          connectionStatus.textContent = '❌ Disconnected';
+        });
+      });
+
+      let clientKeys = { up: false, down: false, left: false, right: false };
+      function sendKeys() {
+        if (connected && hostConn) {
+          hostConn.send({ type: 'keys', keys: clientKeys });
+        }
+      }
+      document.addEventListener('keydown', (e) => {
+        const dir = keyDir(e);
+        if (!dir) return;
+        e.preventDefault();
+        clientKeys[dir] = true;
+        sendKeys();
+      });
+      document.addEventListener('keyup', (e) => {
+        const dir = keyDir(e);
+        if (!dir) return;
+        e.preventDefault();
+        clientKeys[dir] = false;
+        sendKeys();
+      });
+
+      setInterval(() => { sendKeys(); }, 30);
+
+      function clientRender() {
+        frameCount++;
+        if (frameCount % 2 === 0) {
+          const ballWorld = new THREE.Vector3();
+          ball.getWorldPosition(ballWorld);
+          cubeCamera.position.copy(ballWorld);
+          const wasVisible = ball.visible;
+          ball.visible = false;
+          cubeCamera.update(renderer, scene);
+          ball.visible = wasVisible;
+        }
+        particles.update(1/60);
+        
+        // Smoothly interpolate to target position (never during the title screen)
+        if (!titleGroup.visible) {
+          ball.position.x += (targetPos.x - ball.position.x) * 0.3;
+          ball.position.y += (targetPos.y - ball.position.y) * 0.3;
+          ball.position.z += (targetPos.z - ball.position.z) * 0.3;
+        }
+
+        // Keep the ball glow following the ball (host does this in physics)
+        ballLight.position.copy(ball.position);
+        ballLight.position.y = ball.position.y + 0.5;
+
+        currentRotX += (targetRotX - currentRotX) * 0.3;
+        currentRotZ += (targetRotZ - currentRotZ) * 0.3;
+        tableGroup.rotation.x = currentRotX;
+        tableGroup.rotation.z = currentRotZ;
+
+        // Title faces the camera (yaw only, stays upright), plus clamped mouse rotation/tilt
+        if (titleGroup.visible) {
+            titleGroup.rotation.y = Math.atan2(
+                camera.position.x - titleGroup.position.x,
+                camera.position.z - titleGroup.position.z
+            ) + titleRotOffset;
+            titleGroup.rotation.x = -0.2 + titleTiltOffset;
+            ball.rotation.y += 0.015;
+        }
+
+        renderer.render(scene, camera);
+        updateCamera();
+        drawMinimap();
+
+        requestAnimationFrame(clientRender);
+      }
+      
+      clientRender();
+
+      currentLevel = 1;
+      updateHUD(); 
+    }
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    updateCamera();
+    console.log('Tilt Collective loaded.');
+  </script>
+</body>
+</html>
