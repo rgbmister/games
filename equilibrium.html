@@ -1,0 +1,2042 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EQUILIBRIUM — a study in balance</title>
+
+<!-- ============================================================
+     EQUILIBRIUM
+     A minimalist typography-based physics puzzle.
+     Stack letter blocks onto a rocking half-circle shelf.
+
+     Tech: Matter.js (rigid-body physics) + Google Fonts.
+     Zero build step — just open this file in a browser.
+
+     Physics model:
+       - The rocker is a dynamic semi-circle pinned to a static
+         fulcrum peg by a revolute (pin) constraint, so it can
+         only rotate. Gravity acting on the offset centre of
+         mass restores it to level, which is what makes it rock.
+       - Letters are built from the real glyph outlines (concave SVG
+         paths flattened from the font, decomposed with poly-decomp),
+         so adjacent letters touch along their actual ink edges. Each
+         letter is drawn as a pure glyph and attributed to a player.
+         Falls back to measured rectangles if the font can't load.
+     ============================================================ -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=Montserrat:wght@300;400;500;600&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/opentype.js@1.3.4/dist/opentype.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/poly-decomp@0.3.0/build/decomp.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
+
+<style>
+  /* ------------------------------------------------------------
+     Design tokens — deep charcoal / warm cream / gold & copper
+     ------------------------------------------------------------ */
+  :root{
+    --bg:        #131110;
+    --bg-deep:   #0d0c0b;
+    --panel:     #1c1916;
+    --cream:     #f2ecdf;
+    --gold:      #c9a24b;
+    --copper:    #c98a4f;
+    --muted:     #938a7b;
+    --line:      rgba(240, 231, 214, 0.14);
+  }
+
+  *{ box-sizing: border-box; }
+
+  html, body{ height: 100%; }
+
+  body{
+    margin: 0;
+    font-family: 'Montserrat', sans-serif;
+    color: var(--cream);
+    background:
+      radial-gradient(1100px 700px at 50% -12%, #201c17 0%, var(--bg) 52%, var(--bg-deep) 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 18px;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* ------------------------------------------------------------
+     The stage — canvas + HTML overlays, keeps 960x640 ratio
+     ------------------------------------------------------------ */
+  #stage{
+    position: relative;
+    width:  min(96vw, calc(100vh * 1.5), 1080px);
+    aspect-ratio: 960 / 640;
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    background: radial-gradient(120% 90% at 50% 0%, #1b1814 0%, #141210 60%, #100e0c 100%);
+    box-shadow: 0 40px 90px rgba(0,0,0,0.55), 0 2px 0 rgba(255,255,255,0.04) inset;
+  }
+
+  canvas#game{
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: none;
+    cursor: default;
+  }
+
+  /* subtle vignette above the canvas */
+  .vignette{
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    box-shadow: inset 0 0 120px rgba(0,0,0,0.55);
+    border-radius: 6px;
+    z-index: 5;
+  }
+
+  /* ------------------------------------------------------------
+     HUD — top bar
+     ------------------------------------------------------------ */
+  .hud{
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 18px 22px;
+    z-index: 10;
+    pointer-events: none;
+  }
+  .hud-brand{
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    font-size: 13px;
+    color: var(--cream);
+  }
+  .hud-mode{
+    margin-top: 5px;
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.38em;
+    color: var(--gold);
+    text-transform: uppercase;
+  }
+  .hud-next-card{
+    margin-top: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(28, 25, 22, 0.7);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 4px 10px;
+    backdrop-filter: blur(4px);
+  }
+  .hud-next-label{
+    font-size: 8px;
+    letter-spacing: 0.3em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+  .hud-next-char{
+    font-family: 'Spectral', 'Cormorant Garamond', serif;
+    font-weight: 800;
+    font-size: 20px;
+    color: var(--gold);
+    line-height: 1;
+  }
+  .hud-center{
+    text-align: center;
+    padding-top: 3px;
+  }
+  .hud-turn{
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.32em;
+    color: var(--cream);
+    transition: color 0.3s ease;
+  }
+  .hud-turn.hud-p2{ color: var(--copper); }
+  .hud-turn.hud-p1{ color: var(--gold); }
+  .hud-turn-sub{
+    display: block;
+    margin-top: 4px;
+    font-size: 8px;
+    font-weight: 400;
+    letter-spacing: 0.4em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+  .hud-right{
+    text-align: right;
+  }
+  .hud-score{
+    display: block;
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 26px;
+    line-height: 1;
+    color: var(--cream);
+    font-variant-numeric: tabular-nums;
+  }
+  .hud-score-label{
+    display: block;
+    margin-top: 5px;
+    font-size: 8px;
+    letter-spacing: 0.4em;
+    color: var(--muted);
+  }
+  .hud-best{
+    display: block;
+    margin-top: 4px;
+    font-size: 9px;
+    letter-spacing: 0.26em;
+    color: var(--gold);
+  }
+
+  .hud-actions{
+    position: absolute;
+    top: 16px; right: 16px;
+    display: flex;
+    gap: 8px;
+    z-index: 20;
+  }
+  .icon-btn{
+    width: 34px; height: 34px;
+    border: 1px solid var(--line);
+    background: rgba(20,18,15,0.55);
+    color: var(--cream);
+    font-size: 13px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color 0.25s ease, color 0.25s ease, background 0.25s ease;
+  }
+  .icon-btn:hover{ border-color: var(--gold); color: var(--gold); }
+  .icon-btn.muted{ color: var(--muted); text-decoration: line-through; }
+
+  /* ------------------------------------------------------------
+     Overlays (menu / pause / game-over)
+     ------------------------------------------------------------ */
+  .overlay{
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    background: linear-gradient(180deg, rgba(15,13,11,0.82) 0%, rgba(15,13,11,0.94) 100%);
+    backdrop-filter: blur(3px);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.5s ease, visibility 0s linear 0.5s;
+    padding: 24px;
+  }
+  .overlay.show{
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.5s ease, visibility 0s;
+  }
+
+  .menu-inner{
+    max-width: 520px;
+    width: 100%;
+    container-type: inline-size;   /* lets the title scale with the menu */
+  }
+  .overline{
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.5em;
+    padding-left: 0.5em;      /* cancel the trailing letter-space so centered text sits true */
+    color: var(--gold);
+    text-transform: uppercase;
+    margin-bottom: 18px;
+  }
+  .title{
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: clamp(28px, 7vw, 56px);
+    font-size: clamp(24px, 12cqw, 58px);
+    line-height: 0.98;
+    letter-spacing: 0.02em;
+    padding-left: 0.02em;      /* cancel the trailing letter-space so centered text sits true */
+    margin: 0 0 14px;
+    color: var(--cream);
+    text-wrap: balance;
+  }
+  .title .amp{
+    font-family: 'Cormorant Garamond', serif;
+    font-style: italic;
+    font-weight: 400;
+    color: var(--gold);
+    letter-spacing: 0;
+  }
+  .tag{
+    font-family: 'Cormorant Garamond', serif;
+    font-style: italic;
+    font-size: 19px;
+    color: var(--muted);
+    margin-bottom: 34px;
+  }
+
+  .big-btn{
+    display: block;
+    width: 100%;
+    padding: 15px 20px;
+    margin-bottom: 12px;
+    text-align: left;
+    font-family: 'Montserrat', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    color: var(--cream);
+    background: rgba(201,162,75,0.05);
+    border: 1px solid rgba(201,162,75,0.32);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+  }
+  .big-btn .sub{
+    display: block;
+    margin-top: 5px;
+    font-size: 9px;
+    font-weight: 300;
+    letter-spacing: 0.18em;
+    color: var(--muted);
+  }
+  .big-btn:hover{
+    border-color: var(--gold);
+    background: rgba(201,162,75,0.14);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  }
+
+  .ghost-btn{
+    display: block;
+    width: 100%;
+    padding: 13px 20px;
+    font-family: 'Montserrat', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.24em;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+  }
+  .ghost-btn:hover{ color: var(--cream); border-color: var(--gold); }
+
+  .rules{
+    margin-top: 30px;
+    font-size: 9px;
+    font-weight: 400;
+    letter-spacing: 0.16em;
+    padding-left: 0.16em;      /* cancel the trailing letter-space so centered text sits true */
+    line-height: 1.9;
+    color: var(--muted);
+  }
+  .over-title{
+    font-size: clamp(26px, 5.5vw, 52px);
+    font-size: clamp(22px, 10.5cqw, 52px);
+    margin-bottom: 8px;
+  }
+  .over-sub{
+    margin-bottom: 30px;
+    font-style: normal;
+  }
+  .paused-hint{
+    font-family: 'Cormorant Garamond', serif;
+    font-style: italic;
+    font-size: 16px;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+  <div id="stage">
+    <canvas id="game"></canvas>
+    <div class="vignette"></div>
+
+    <!-- HUD -->
+    <div class="hud">
+      <div>
+        <div class="hud-brand">EQUILIBRIUM</div>
+        <div class="hud-mode" id="hudMode">SOLO RUN</div>
+        <div class="hud-next-card" id="hudNextCard">
+          <span class="hud-next-label">UP NEXT</span>
+          <span class="hud-next-char" id="hudNextChar">A</span>
+        </div>
+      </div>
+      <div class="hud-center">
+        <span class="hud-turn" id="hudTurn">—</span>
+        <span class="hud-turn-sub" id="hudTurnSub">steady hands</span>
+      </div>
+      <div class="hud-right">
+        <span class="hud-score" id="hudScore">0</span>
+        <span class="hud-score-label" id="hudScoreLabel">SCORE</span>
+        <span class="hud-best" id="hudBest">BEST 0</span>
+      </div>
+    </div>
+    <div class="hud-actions">
+      <button class="icon-btn" id="btnPause" title="Pause (Esc)">▚</button>
+      <button class="icon-btn" id="btnSound" title="Toggle sound">♪</button>
+    </div>
+
+    <!-- Main menu -->
+    <div class="overlay show" id="menu">
+      <div class="menu-inner">
+        <div class="overline">a physics study in typography</div>
+        <h1 class="title">EQUI<span class="amp">&</span>LIBRIUM</h1>
+        <div class="tag">stack letters — hold your nerve — don’t let it fall.</div>
+        <button class="big-btn" data-mode="solo">SINGLE PLAYER
+          <span class="sub">the long run · chase your best score</span>
+        </button>
+        <button class="big-btn" data-mode="duo">TWO PLAYERS
+          <span class="sub">hot seat · take turns — the steadiest wins</span>
+        </button>
+        <div class="rules">
+          CLICK & DRAG THE FLOATING LETTER ONTO THE SHELF.<br>
+          IF ANY LETTER TOUCHES THE LINE BELOW THE STAGE, THE BALANCE BREAKS.
+        </div>
+      </div>
+    </div>
+
+    <!-- Paused -->
+    <div class="overlay" id="pause">
+      <div class="menu-inner">
+        <div class="overline">paused</div>
+        <div class="paused-hint">press escape to resume</div>
+      </div>
+    </div>
+
+    <!-- Game over -->
+    <div class="overlay" id="over">
+      <div class="menu-inner">
+        <div class="overline" id="overOverline">the balance broke</div>
+        <h1 class="title over-title" id="overTitle">SCORE 0</h1>
+        <div class="tag over-sub" id="overSub">best 0</div>
+        <button class="big-btn" id="btnAgain">PLAY AGAIN</button>
+        <button class="ghost-btn" id="btnMenu">MAIN MENU</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ============================================================
+   EQUILIBRIUM — game script
+   Sections:
+     1. Constants & config
+     2. Tiny sound engine (WebAudio)
+     3. State
+     4. Physics setup (rocker, fulcrum, pin)
+     5. Letter management
+     6. Input (pointer drag)
+     7. Rules: turns, scoring, game-over
+     8. Rendering
+     9. Boot / wiring
+   ============================================================ */
+(function(){
+  'use strict';
+
+  /* ------------------------------------------------------------
+     1. CONSTANTS & CONFIG
+     ------------------------------------------------------------ */
+  const W        = 960;                  // logical canvas width
+  const H        = 640;                  // logical canvas height
+  const PIVOT    = { x: W / 2, y: 540 }; // fulcrum / rocker pin point
+  const ROCKER_R = 132;                  // radius of the half-circle
+  const FLOOR_Y  = 556;                  // drawn floor line
+  const DEATH_Y  = 620;                  // below this = game over
+  const LETTER   = 70;                   // fallback letter block size
+  const GLYPH_PX = 68;                   // rendered glyph size (also its size)
+  const COLL_STRIP_H = 32;               // hidden flat foot height under glyph silhouettes
+  const COLL_CAP_H   = 10;               // hidden flat cap on top (stacking shelf)
+  const COLL_EPS     = 0.6;              // collision outline simplification tolerance
+  const SETTLE_GRACE = 650;              // ms after release: damp spin/skid so letters settle calmly
+  const SPAWN_Y  = 150;                  // where the new letter floats
+  const SETTLE   = 950;                  // ms before next letter / turn
+  const TILT_MAX = 0.38;                 // max tilt limit (~21.7 deg) for stable, fair gameplay
+
+  // Balance grace — the rocker starts heavy, damped and forgiving, then sheds
+  // stability as the tower climbs. Early stacks feel calm and earned; the late
+  // game is where the balance really goes badly.
+  const ROCKER_DENSITY_MAX = 0.0055;     // rock-solid at the start
+  const ROCKER_DENSITY_MIN = 0.0045;     // stays heavy at height so counterweights stay effective
+  const GRACE_LEVELS       = 12;         // tower levels over which grace fades out
+  const ROCKER_AIR_DAMP    = 0.018;      // extra angular damping per step
+  const WIND_FORCE         = 0.00005;    // late-game sway strength
+
+  // Tilt brake — the rocker resists its own tipping momentum more and more as
+  // it leans over, so a well-placed counterweight can always pull it back.
+  const TILT_BRAKE_START   = 0.05;       // ~2.9 deg — braking begins here
+  const TILT_BRAKE_MAX     = 0.035;      // max angular velocity shed per step at TILT_MAX
+
+  const FONT_TTF_URL =
+    'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/spectral/Spectral-SemiBold.ttf';
+
+  const PALETTE = {
+    gold:   '#c9a24b',
+    copper: '#c98a4f',
+    cream:  '#f2ecdf',
+  };
+
+  const FONTS = {
+    glyph:  "600 68px 'Spectral', 'Cormorant Garamond', Georgia, serif",
+    micro:  "600 9px 'Montserrat', sans-serif",
+    serifI: "italic 400 16px 'Cormorant Garamond', serif",
+  };
+
+  const LETTER_POOL = 'ABCDEFGHKLMNOPRSTUWXYZ';
+
+  const HS_KEY = 'equilibrium.best';
+
+  /* ------------------------------------------------------------
+     2. TINY SOUND ENGINE (WebAudio, created on first gesture)
+     ------------------------------------------------------------ */
+  let AC = null;         // AudioContext
+  let muted = false;
+  let lastImpactAt = 0;  // throttle for collision blips
+
+  function ensureAudio(){
+    if (AC) return;
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch (e) { /* audio unavailable — game still works */ }
+  }
+
+  const LETTER_PROFILES = {
+    flat:   'IETHEFLUMNBDPR', // Flat block bases: sharp & solid
+    round:  'OCQSG',          // Round bases: roll on curves
+    angled: 'VWYAXK',         // Angled / pointed: wedge or tilt
+  };
+
+  function getLetterChamfer(char) {
+    if (LETTER_PROFILES.round.includes(char))  return 7.5; // rolling curves
+    if (LETTER_PROFILES.angled.includes(char)) return 3.5; // wedge corners
+    return 1.0; // flat rock-solid edges
+  }
+
+  function blip(type){
+    if (muted || !AC) return;
+    try {
+      const t = AC.currentTime;
+      const o = AC.createOscillator();
+      const g = AC.createGain();
+      o.type = 'sine';
+
+      let f0 = 200, f1 = 90, vol = 0.10, dur = 0.16;
+      if (type === 'place')     { f0 = 320; f1 = 140; dur = 0.14; }
+      if (type === 'thud')      { f0 = 150; f1 = 70;  dur = 0.10; vol = 0.14; }
+      if (type === 'start')     { f0 = 180; f1 = 360; dur = 0.28; }
+      if (type === 'rebalance') { f0 = 440; f1 = 880; dur = 0.32; vol = 0.15; }
+      if (type === 'milestone') { f0 = 523; f1 = 1046; dur = 0.45; vol = 0.16; }
+      if (type === 'climb')     { f0 = 392; f1 = 784; dur = 0.22; vol = 0.10; }
+      if (type === 'smash')     { o.type = 'sawtooth'; f0 = 240; f1 = 28; dur = 0.38; vol = 0.20; }
+      if (type === 'over')      { f0 = 130; f1 = 52;  dur = 0.9;  vol = 0.16; }
+
+      o.frequency.setValueAtTime(f0, t);
+      o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(AC.destination);
+      o.start(t); o.stop(t + dur + 0.02);
+    } catch (e) { /* ignore */ }
+  }
+
+  /* ------------------------------------------------------------
+     3. STATE
+     ------------------------------------------------------------ */
+  const state = {
+    mode:       null,   // 'solo' | 'duo'
+    phase:      'menu', // 'menu' | 'play' | 'over'
+    turn:       0,      // 0 = player one, 1 = player two
+    touched:    false,  // has the current player committed to their letter?
+    scores:     [0, 0],
+    best:       0,
+    active:     null,   // current floating letter body
+    activeChar: '',
+    nextChar:   '',     // queue preview
+    towerLevel: 0,
+    towerPeakY: 0,
+    dragging:   null,  // { con, body }
+    cooldown:   0,     // ms until next spawn / turn switch
+    paused:     false,
+  };
+
+  /* ------------------------------------------------------------
+     4. PHYSICS SETUP
+     ------------------------------------------------------------ */
+  const Engine = Matter.Engine;
+  const Bodies = Matter.Bodies;
+  const Body   = Matter.Body;
+  const Composite = Matter.Composite;
+  const Constraint = Matter.Constraint;
+
+  const engine = Engine.create();
+  engine.enableSleeping = false;
+  engine.positionIterations = 12;  // sturdier stacks
+  engine.velocityIterations = 8;
+
+  let world    = engine.world;
+  let peg      = null;
+  let rocker   = null;
+  let mouseBody = null;   // ghost point the drag constraint attaches to
+  let hoveredLetter = false;
+
+  // Gravity is a touch below Earth-normal so stacks breathe a little.
+  engine.gravity.y = 1;
+  engine.gravity.scale = 0.001;
+
+  function buildLevel(){
+    Composite.clear(world, false);
+
+    // Ghost drag point — participates in the solver but collides with nothing.
+    mouseBody = Bodies.circle(0, 0, 4, {
+      isStatic: true,
+      label: 'mouse',
+      collisionFilter: { category: 0x0001, mask: 0x0000 },
+    });
+
+    // Static fulcrum peg (group -1 so it never fights the rocker pin).
+    peg = Bodies.circle(PIVOT.x, PIVOT.y, 9, {
+      isStatic: true,
+      label: 'peg',
+      collisionFilter: { group: -1 },
+    });
+
+    // --- Build the half-circle rocker as an accurate polygon ---
+    // Vertices: left corner -> bottom arc -> right corner (convex).
+    const verts = [];
+    verts.push({ x: -ROCKER_R, y: 0 });
+    const SEG = 26;
+    for (let i = 0; i <= SEG; i++) {
+      const a = Math.PI - (Math.PI * i / SEG);   // sweeps PI -> 0
+      verts.push({
+        x: ROCKER_R * Math.cos(a),
+        y: ROCKER_R * Math.sin(a),
+      });
+    }
+    verts.push({ x: ROCKER_R, y: 0 });
+
+    try {
+      // The half-circle is convex: use its hull directly so Matter never
+      // runs poly-decomp on it (which chokes on the duplicate closing point).
+      const hull = Matter.Vertices.hull(verts);
+      rocker = Bodies.fromVertices(PIVOT.x, PIVOT.y - 40, hull, {
+        label: 'rocker',
+        friction: 0.95,       // grippy shelf so letters don't skid
+        frictionStatic: 1.0,
+        restitution: 0.01,
+        frictionAir: 0.025,   // smooth physical air damping
+        density: ROCKER_DENSITY_MAX,  // heavy & forgiving at first; sheds weight as the tower grows
+        collisionFilter: { group: -1 },
+      });
+    } catch (err) {
+      rocker = Bodies.circle(PIVOT.x, PIVOT.y - 40, ROCKER_R, {
+        label: 'rocker',
+        friction: 0.95,
+        frictionAir: 0.025,
+        density: ROCKER_DENSITY_MAX,
+        collisionFilter: { group: -1 },
+      });
+    }
+
+    Body.setAngle(rocker, 0);
+
+    // Stable pivot point set ABOVE the center-of-mass (local y < 0):
+    const pivotLocal = { x: 0, y: -16 };
+
+    // Position rocker so its pivotLocal matches PIVOT in world space:
+    Body.setPosition(rocker, {
+      x: PIVOT.x - pivotLocal.x,
+      y: PIVOT.y - pivotLocal.y,
+    });
+
+    // Compute exact shelf top corners in rocker local frame AFTER position is finalized:
+    let topY = 1e9;
+    for (const v of rocker.vertices) {
+      if (v.y < topY) topY = v.y;
+    }
+    let leftW = null, rightW = null;
+    for (const v of rocker.vertices) {
+      if (Math.abs(v.y - topY) < 3) {
+        if (!leftW || v.x < leftW.x) leftW = v;
+        if (!rightW || v.x > rightW.x) rightW = v;
+      }
+    }
+
+    rocker.gameData = {
+      pivotLocal: pivotLocal,
+      shelfL: { x: leftW.x - rocker.position.x, y: leftW.y - rocker.position.y },
+      shelfR: { x: rightW.x - rocker.position.x, y: rightW.y - rocker.position.y },
+    };
+
+    // Static fulcrum peg:
+    peg = Bodies.circle(PIVOT.x, PIVOT.y, 9, {
+      isStatic: true,
+      label: 'peg',
+      collisionFilter: { group: -1 },
+    });
+
+    // Revolute pin: rocker rotates smoothly about its pivot point.
+    const pin = Constraint.create({
+      bodyA: peg,
+      pointA: { x: 0, y: 0 },
+      bodyB: rocker,
+      pointB: pivotLocal,
+      stiffness: 1,
+      angularStiffness: 0,
+      length: 0,
+      label: 'pin',
+    });
+
+    Composite.add(world, [peg, rocker, mouseBody, pin]);
+  }
+
+  /* ------------------------------------------------------------
+     5. LETTERS
+     ------------------------------------------------------------ */
+  function randomChar(){
+    return LETTER_POOL[Math.floor(Math.random() * LETTER_POOL.length)];
+  }
+
+  let glyphFont = null;        // parsed opentype font (loaded async)
+
+  function loadGlyphFont(){
+    if (!window.opentype) return;
+    fetch(FONT_TTF_URL)
+      .then(function (r) {
+        if (!r.ok) throw new Error('font http ' + r.status);
+        return r.arrayBuffer();
+      })
+      .then(function (buf) {
+        glyphFont = window.opentype.parse(buf);
+        upgradeActiveLetter();
+      })
+      .catch(function (err) {
+        console.warn('glyph font unavailable — using rectangle collision', err);
+      });
+  }
+
+  // Flatten an opentype path into arrays of {x, y} per contour.
+  function flattenPath(path){
+    const contours = [];
+    let cur = null;
+    const seg = function (pt) { if (cur) cur.push({ x: pt.x, y: pt.y }); };
+    for (const cmd of path.commands) {
+      switch (cmd.type) {
+        case 'M': cur = []; contours.push(cur); seg(cmd); break;
+        case 'L': seg(cmd); break;
+        case 'Q': {
+          const p0 = cur[cur.length - 1];
+          for (let i = 1; i <= 8; i++) {
+            const t = i / 8, u = 1 - t;
+            seg({ x: u*u*p0.x + 2*u*t*cmd.x1 + t*t*cmd.x,
+                  y: u*u*p0.y + 2*u*t*cmd.y1 + t*t*cmd.y });
+          }
+          break;
+        }
+        case 'C': {
+          const p0 = cur[cur.length - 1];
+          for (let i = 1; i <= 14; i++) {
+            const t = i / 14, u = 1 - t;
+            seg({ x: u*u*u*p0.x + 3*u*u*t*cmd.x1 + 3*u*t*t*cmd.x2 + t*t*t*cmd.x,
+                  y: u*u*u*p0.y + 3*u*u*t*cmd.y1 + 3*u*t*t*cmd.y2 + t*t*t*cmd.y });
+          }
+          break;
+        }
+        case 'Z':
+          if (cur && cur.length) cur.push({ x: cur[0].x, y: cur[0].y });
+          cur = null;
+          break;
+      }
+    }
+    return contours.filter(function (c) { return c.length >= 3; });
+  }
+
+  // Douglas–Peucker simplification keeps the physics vertex count sane.
+  function simplify(pts, eps){
+    if (pts.length <= 4) return pts;
+    let dmax = 0, index = 0;
+    const a = pts[0], b = pts[pts.length - 1];
+    for (let i = 1; i < pts.length - 1; i++) {
+      const d = distToSegment(pts[i], a, b);
+      if (d > dmax) { index = i; dmax = d; }
+    }
+    if (dmax > eps) {
+      return simplify(pts.slice(0, index + 1), eps)
+        .slice(0, -1)
+        .concat(simplify(pts.slice(index), eps));
+    }
+    return [a, b];
+  }
+  function distToSegment(p, a, b){
+    const abx = b.x - a.x, aby = b.y - a.y;
+    const len2 = abx * abx + aby * aby;
+    if (len2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+    let t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p.x - (a.x + t * abx), p.y - (a.y + t * aby));
+  }
+
+  // Centred glyph outline + the draw offset that matches the body.
+  function glyphOutline(c){
+    if (!glyphFont) return null;
+    try {
+      const path = glyphFont.getPath(c, 0, 0, GLYPH_PX);
+      const contours = flattenPath(path)
+        .map(function (ct) {
+          const s = simplify(ct, 0.6);
+          return s.length >= 3 ? s : ct;
+        })
+        .filter(function (ct) { return ct.length >= 3; });
+      if (!contours.length) return null;
+
+      let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+      for (const ct of contours) for (const p of ct) {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+      }
+      const off = { x: -(minX + maxX) / 2, y: -(minY + maxY) / 2 };
+      const moved = contours.map(function (ct) {
+        return ct.map(function (p) { return { x: p.x + off.x, y: p.y + off.y }; });
+      });
+      return { contours: moved, off: off, w: maxX - minX, h: maxY - minY };
+    } catch (e) { return null; }
+  }
+
+  // Measure the glyph's real ink bounds so the fallback rectangle hugs
+  // the letter. Returns a tight rectangle plus the draw offset.
+  function measureGlyph(c){
+    ctx.font = FONTS.glyph;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    let m = null;
+    try { m = ctx.measureText(c); } catch (e) { m = null; }
+
+    const hasMetrics = m && isFinite(m.actualBoundingBoxLeft);
+    const pad = 0.5;   // tight fit so letters sit flush on the shelf & each other
+    let left, top, iw, ih;   // ink box, in glyph-draw coordinates
+
+    if (hasMetrics) {
+      left = m.actualBoundingBoxLeft;
+      top  = -m.actualBoundingBoxAscent;
+      iw   = m.actualBoundingBoxRight - m.actualBoundingBoxLeft;
+      ih   = m.actualBoundingBoxAscent  + m.actualBoundingBoxDescent;
+    } else {
+      // Old browser fallback — approximate ink box.
+      left = -LETTER * 0.36;
+      top  = -LETTER * 0.36;
+      iw   = LETTER * 0.72;
+      ih   = LETTER * 0.72;
+    }
+
+    const w = Math.max(iw + pad * 2, 14);
+    const h = Math.max(ih + pad * 2, 14);
+
+    // Centre of the ink box in glyph-draw coordinates.
+    const cx = left + iw / 2;
+    const cy = top  + ih / 2;
+
+    return {
+      w: w,
+      h: h,
+      hw: w / 2,
+      hh: h / 2,
+      gx: -cx,   // where to draw the glyph so its ink is centred on the body
+      gy: -cy,
+    };
+  }
+
+  function polyArea(pts){
+    let a = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const p1 = pts[i], p2 = pts[(i + 1) % pts.length];
+      a += p1.x * p2.y - p2.x * p1.y;
+    }
+    return Math.abs(a) / 2;
+  }
+
+  // Cached collision geometry per letter, so each shape is only decomposed once.
+  const shapeCache = {};
+
+  // Collision geometry for one letter: the glyph's outer silhouette (inner
+  // counters ignored, so fromVertices never sees hollow shapes) plus a short
+  // hidden flat foot. The SIDES are the real ink outline — no phantom corners
+  // poking neighbours — while the flat foot lets letters rest upright instead
+  // of rolling. Falls back to {sets:null} so callers use a rectangle.
+  function buildGlyphCollision(c){
+    if (shapeCache[c]) return shapeCache[c];
+    if (!glyphFont) return { sets: null };
+    try {
+      const path = glyphFont.getPath(c, 0, 0, GLYPH_PX);
+      const contours = flattenPath(path)
+        .map(function (ct) {
+          const s = simplify(ct, COLL_EPS);
+          return s.length >= 3 ? s : ct;
+        })
+        .filter(function (ct) { return ct.length >= 3; });
+      if (!contours.length) return { sets: null };
+
+      let outer = null, best = -1;
+      for (const ct of contours) {
+        const a = polyArea(ct);
+        if (a > best) { best = a; outer = ct; }
+      }
+      if (!outer || best <= 0) return { sets: null };
+
+      let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+      for (const p of outer) {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+      }
+      const off = { x: -(minX + maxX) / 2, y: -(minY + maxY) / 2 };
+      const sil = outer.map(function (p) { return { x: p.x + off.x, y: p.y + off.y }; });
+
+      const sets = [sil];
+
+      // Hidden flat foot: span the silhouette's bottom COLL_STRIP_H px so the
+      // letter stands upright. Its width never exceeds the ink at that height,
+      // so it can't push a neighbour whose ink isn't already overlapping.
+      let bY = -1e9;
+      for (const p of sil) if (p.y > bY) bY = p.y;
+      let bMinX = 1e9, bMaxX = -1e9;
+      for (const p of sil) {
+        if (p.y >= bY - COLL_STRIP_H) {
+          if (p.x < bMinX) bMinX = p.x;
+          if (p.x > bMaxX) bMaxX = p.x;
+        }
+      }
+      if (bMaxX - bMinX >= 8) {
+        sets.push([
+          { x: bMinX, y: bY }, { x: bMaxX, y: bY },
+          { x: bMaxX, y: bY - COLL_STRIP_H }, { x: bMinX, y: bY - COLL_STRIP_H },
+        ]);
+      }
+
+      // Hidden flat cap: the top COLL_CAP_H px also get a flat surface so a
+      // letter placed on top lands on a shelf instead of a rounded point.
+      let tY = 1e9;
+      for (const p of sil) if (p.y < tY) tY = p.y;
+      let tMinX = 1e9, tMaxX = -1e9;
+      for (const p of sil) {
+        if (p.y <= tY + COLL_CAP_H) {
+          if (p.x < tMinX) tMinX = p.x;
+          if (p.x > tMaxX) tMaxX = p.x;
+        }
+      }
+      if (tMaxX - tMinX >= 6) {
+        sets.push([
+          { x: tMinX, y: tY }, { x: tMaxX, y: tY },
+          { x: tMaxX, y: tY + COLL_CAP_H }, { x: tMinX, y: tY + COLL_CAP_H },
+        ]);
+      }
+
+      const cached = {
+        sets: sets,
+        off: off,
+        w: maxX - minX,
+        h: maxY - minY,
+      };
+      shapeCache[c] = cached;
+      return cached;
+    } catch (e) {
+      return { sets: null };
+    }
+  }
+
+  const LETTER_OPTS = {
+    label: 'letter',
+    friction: 0.8,            // holds counterweights in place on the tilted shelf
+    frictionStatic: 1.0,
+    restitution: 0.02,
+    density: 0.0012,
+  };
+
+  // Build one letter body. When the glyph font is ready the collision is the
+  // letter's real silhouette (fair, side-accurate contact); otherwise a tight
+  // chamfered bounding block keeps the game fully working.
+  function createLetterBody(x, y, c, owner, shade){
+    const oc = buildGlyphCollision(c);
+    if (oc && oc.sets) {
+      let b = null;
+      try {
+        b = Bodies.fromVertices(0, 0, oc.sets, Object.assign({}, LETTER_OPTS));
+        if (!b || !isFinite(b.position.x) || !isFinite(b.position.y) || !b.area || b.area <= 0) b = null;
+        if (b) {
+          const bb = b.bounds;
+          if (bb.max.x - bb.min.x > oc.w * 2 || bb.max.y - bb.min.y > oc.h * 2) b = null;
+        }
+      } catch (e) { b = null; }
+      if (b) {
+        Body.setPosition(b, { x: x, y: y });
+        b.gameData = {
+          char: c,
+          owner: owner,
+          shade: shade,
+          shape: 'path',
+          off: oc.off,
+          gx: oc.off.x,
+          gy: oc.off.y,
+          hw: oc.w / 2,
+          hh: oc.h / 2,
+        };
+        return b;
+      }
+    }
+    const g = measureGlyph(c);
+    const radius = getLetterChamfer(c);
+    const b = Bodies.rectangle(x, y, g.w, g.h, Object.assign({}, LETTER_OPTS, {
+      chamfer: { radius: radius },
+    }));
+    b.gameData = {
+      char: c,
+      owner: owner,
+      shade: shade,
+      shape: 'rect',
+      gx: g.gx,
+      gy: g.gy,
+      hw: g.hw,
+      hh: g.hh,
+    };
+    return b;
+  }
+
+  // A letter spawns floating, static, until the player claims it.
+  function spawnLetter(){
+    if (!state.nextChar) state.nextChar = randomChar();
+    const c = state.nextChar;
+    state.nextChar = randomChar();
+
+    const nextEl = document.getElementById('hudNextChar');
+    if (nextEl) nextEl.textContent = state.nextChar;
+
+    const b = createLetterBody(PIVOT.x, SPAWN_Y, c, state.turn, Math.random() < 0.5 ? 0 : 1);
+    Body.setStatic(b, true);
+    Composite.add(world, b);
+    state.active = b;
+    state.activeChar = c;
+    state.touched = false;
+  }
+
+  // If the glyph font arrives mid-run, swap the floating letter to its
+  // real outline body.
+  function upgradeActiveLetter(){
+    if (!glyphFont || state.phase !== 'play' || !state.active) return;
+    const a = state.active;
+    if (!a.isStatic || a.gameData.shape === 'path') return;
+    const nb = createLetterBody(a.position.x, a.position.y,
+                                a.gameData.char, a.gameData.owner, a.gameData.shade);
+    if (nb.gameData.shape === 'rect') return;   // couldn't improve
+    Composite.remove(world, a);
+    Composite.add(world, nb);
+    state.active = nb;
+    state.activeChar = nb.gameData.char;
+  }
+
+  /* ------------------------------------------------------------
+     6. INPUT — drag the active letter only
+     ------------------------------------------------------------ */
+  const canvas = document.getElementById('game');
+  const ctx    = canvas.getContext('2d');
+
+  function pointerToWorld(e){
+    const r = canvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - r.left) / r.width  * W,
+      y: (e.clientY - r.top)  / r.height * H,
+    };
+  }
+
+  function hitActive(p){
+    const a = state.active;
+    if (!a || state.phase !== 'play') return false;
+    const dx = p.x - a.position.x;
+    const dy = p.y - a.position.y;
+    const g = a.gameData;
+    return Math.abs(dx) <= g.hw + 3 && Math.abs(dy) <= g.hh + 3;
+  }
+
+  function onPointerDown(e){
+    ensureAudio();
+    if (state.phase !== 'play' || state.paused) return;
+    const p = pointerToWorld(e);
+    if (!hitActive(p)) return;
+    try {
+      canvas.setPointerCapture(e.pointerId);
+    } catch (err) { /* ignore */ }
+
+    const a = state.active;
+    Body.setStatic(a, false);            // gravity takes over from here
+    state.touched = true;
+
+    // Heavy air friction while held prevents wild wobbling / spinning:
+    a.frictionAir = 0.12;
+    Body.setAngularVelocity(a, 0);
+
+    // Grab point in world space relative to letter center:
+    const worldDx = p.x - a.position.x;
+    const worldDy = p.y - a.position.y;
+
+    // Transform world delta into letter's local coordinate frame:
+    const cos = Math.cos(a.angle);
+    const sin = Math.sin(a.angle);
+    const grab = {
+      x:  worldDx * cos + worldDy * sin,
+      y: -worldDx * sin + worldDy * cos,
+    };
+
+    const con = Constraint.create({
+      bodyA: mouseBody,
+      pointA: { x: 0, y: 0 },
+      bodyB: a,
+      pointB: grab,
+      stiffness: 1,         // rigid follow — the letter rides the pointer, no swing
+      damping: 0.2,
+      length: 0,
+      label: 'drag',
+    });
+    Composite.add(world, con);
+    Body.setPosition(mouseBody, p);
+    state.dragging = { con: con, body: a };
+  }
+
+  function onPointerMove(e){
+    if (state.phase !== 'play') return;
+    const p = pointerToWorld(e);
+
+    // Update the ghost drag point.
+    if (state.dragging) {
+      Body.setPosition(mouseBody, p);
+      canvas.style.cursor = 'grabbing';
+      return;
+    }
+
+    // Hover feedback on the floating letter.
+    hoveredLetter = hitActive(p);
+    canvas.style.cursor = hoveredLetter ? 'grab' : 'default';
+  }
+
+  function stopDragging(){
+    if (!state.dragging) return;
+    if (state.dragging.body) {
+      // Restore normal air friction on release and kill most of the spin so
+      // the letter drops flat onto the stack instead of flailing around.
+      const b = state.dragging.body;
+      b.frictionAir = 0.03;
+      Body.setAngularVelocity(b, b.angularVelocity * 0.2);
+      // Settle grace: for the next moment the letter's spin and skid are
+      // heavily damped so it drops flat onto the stack instead of spinning
+      // out and smacking its neighbours.
+      b.gameData.settleUntil = performance.now() + SETTLE_GRACE;
+    }
+    try { Composite.remove(world, state.dragging.con); } catch (e) { /* ignore */ }
+    state.dragging = null;
+  }
+
+  /* Juicy placement effects & floating popups */
+  let particles = [];
+  let popups = [];
+  let shake = 0;   // screen shake magnitude — dies down on its own
+
+  function spawnParticles(x, y, color){
+    for (let i = 0; i < 16; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1.0 + Math.random() * 3.5;
+      particles.push({
+        x: x, y: y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 1.2,
+        life: 1.0,
+        color: color || PALETTE.gold,
+        r: 2.0 + Math.random() * 2.5,
+      });
+    }
+  }
+
+  // A letter is fragile — when it hits the floor it shatters into shards.
+  function spawnSmash(x, y, color){
+    for (let i = 0; i < 42; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1.5 + Math.random() * 5.5;
+      particles.push({
+        x: x, y: y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 3.0,
+        life: 0.9 + Math.random() * 0.5,
+        color: color || PALETTE.gold,
+        r: 2.5 + Math.random() * 3.5,
+        shape: 'shard',
+        rot: Math.random() * Math.PI * 2,
+        vrot: (Math.random() - 0.5) * 0.35,
+      });
+    }
+    for (let i = 0; i < 14; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 0.5 + Math.random() * 1.6;
+      particles.push({
+        x: x, y: y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 0.6,
+        life: 0.7 + Math.random() * 0.4,
+        color: 'rgba(240,231,214,0.55)',
+        r: 1.5 + Math.random() * 2.0,
+        shape: 'dust',
+      });
+    }
+  }
+
+  function addPopup(x, y, text, color){
+    popups.push({ x: x, y: y, text: text, life: 1.0, color: color || PALETTE.gold });
+  }
+
+  function updateJuice(dt){
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.12;
+      if (p.vrot) p.rot += p.vrot;
+      p.life -= dt * 0.0022;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+    for (let i = popups.length - 1; i >= 0; i--) {
+      const pop = popups[i];
+      pop.y -= 0.6;
+      pop.life -= dt * 0.0016;
+      if (pop.life <= 0) popups.splice(i, 1);
+    }
+    if (shake > 0) {
+      shake *= 0.88;
+      if (shake < 0.3) shake = 0;
+    }
+  }
+
+  function drawJuice(){
+    for (const p of particles) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, p.life);
+      if (p.shape === 'shard') {
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.r / 2, -p.r / 4, p.r, p.r / 2);
+      } else {
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+    for (const pop of popups) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, pop.life);
+      ctx.font = "700 13px 'Montserrat', sans-serif";
+      ctx.fillStyle = pop.color;
+      ctx.textAlign = 'center';
+      ctx.fillText(pop.text, pop.x, pop.y);
+      ctx.restore();
+    }
+  }
+
+  function onPointerUp(){
+    if (!state.dragging) return;
+    const body = state.dragging.body;
+    stopDragging();
+    canvas.style.cursor = 'default';
+    if (state.phase !== 'play') return;
+
+    lastRockerAngle = Math.abs(rocker.angle);
+
+    const owner = body.gameData.owner;
+    const hInfo = calculateTowerHeight();
+    // Height bonus grows steeply with the peak — tall runs are worth more.
+    const heightBonus = 5 * Math.max(1, hInfo.level) * Math.max(1, hInfo.level);
+    const scoreAdd = 10 + heightBonus;
+    state.scores[owner] += scoreAdd;
+    state.cooldown = SETTLE;
+
+    // Placement particles & floating text pop:
+    const color = letterColor(body);
+    spawnParticles(body.position.x, body.position.y + body.gameData.hh, color);
+    
+    const distFromCenter = Math.abs(body.position.x - PIVOT.x);
+    if (distFromCenter < 35) {
+      addPopup(body.position.x, body.position.y - body.gameData.hh - 10, 'BULLSEYE +' + (scoreAdd + 10), PALETTE.gold);
+      state.scores[owner] += 10;
+    } else {
+      addPopup(body.position.x, body.position.y - body.gameData.hh - 10, '+' + scoreAdd, PALETTE.cream);
+    }
+
+    state.active = null;
+    blip('place');
+    updateHUD();
+  }
+
+  /* ------------------------------------------------------------
+     7. RULES — turns, scoring, height tracking, game over
+     ------------------------------------------------------------ */
+  let lastRockerAngle = 0;
+  let maxMilestoneReached = 0;
+  let peakLevelSeen = 0;
+  let lastHudKey = '';
+
+  function calculateTowerHeight(){
+    const bodies = Composite.allBodies(world);
+    let highestY = PIVOT.y - 40;
+    let count = 0;
+    for (const b of bodies) {
+      if (b.label === 'letter' && !b.isStatic) {
+        count++;
+        const topY = b.position.y - b.gameData.hh;
+        if (topY < highestY) highestY = topY;
+      }
+    }
+    const heightPx = Math.max(0, (PIVOT.y - 40) - highestY);
+    const heightLevel = Math.floor(heightPx / 40);
+    return { peakY: highestY, level: heightLevel, count: count };
+  }
+
+  function postStep(){
+    if (state.phase === 'play' || state.phase === 'menu') {
+      const hInfo = calculateTowerHeight();
+      state.towerLevel = hInfo.level;
+      state.towerPeakY = hInfo.peakY;
+
+      if (state.phase === 'play') {
+        // --- Balance grace: the base is heaviest and calmest while the
+        //     tower is low, then sheds stability as it climbs — so the run
+        //     builds a sense of achievement before the danger really hits.
+        const grace = Math.max(0, 1 - hInfo.level / GRACE_LEVELS);
+
+        // Rocker sheds weight (restoring force) as the tower rises.
+        const targetDensity = ROCKER_DENSITY_MIN + (ROCKER_DENSITY_MAX - ROCKER_DENSITY_MIN) * grace;
+        if (Math.abs(rocker.density - targetDensity) > 0.0001) {
+          Body.setDensity(rocker, targetDensity);
+        }
+
+        // Extra angular damping so the base doesn't ring and shake the stack
+        // off. Strongest early, fades away along with the grace.
+        const damp = ROCKER_AIR_DAMP * (0.35 + 0.65 * grace);
+        const av = rocker.angularVelocity;
+        if (av !== 0) Body.setAngularVelocity(rocker, av * (1 - damp));
+
+        // Gentle spin-down for letters so the stack calms instead of flailing.
+        // A freshly released letter gets a settle window of extra damping so a
+        // slightly angled drop can't spin it into the rest of the stack.
+        const allBodies = Composite.allBodies(world);
+        const settleNow = performance.now();
+        for (const lb of allBodies) {
+          if (lb.label !== 'letter' || lb.isStatic) continue;
+          const settle = lb.gameData && lb.gameData.settleUntil;
+          if (settle && settleNow < settle) {
+            Body.setAngularVelocity(lb, lb.angularVelocity * 0.90);
+            Body.setVelocity(lb, {
+              x: lb.velocity.x * 0.95,
+              y: lb.velocity.y * 0.95,
+            });
+          } else if (lb.angularVelocity !== 0) {
+            Body.setAngularVelocity(lb, lb.angularVelocity * 0.99);
+          }
+        }
+
+        // Every new height level is worth a toast — stack before the storm.
+        if (hInfo.level >= 2 && hInfo.level > peakLevelSeen) {
+          peakLevelSeen = hInfo.level;
+          const bonus = 20 * hInfo.level;
+          state.scores[state.turn] += bonus;
+          addPopup(PIVOT.x, PIVOT.y - 100, 'HEIGHT L' + hInfo.level + ' +' + bonus, PALETTE.gold);
+          blip('climb');
+          updateHUD();
+        }
+
+        // High altitude wind sway for tall towers (level >= 4).
+        if (hInfo.level >= 4) {
+          const windForce = WIND_FORCE * Math.sin(performance.now() * 0.0018)
+                            * Math.min(hInfo.level - 3, 4) * (0.4 + 0.6 * (1 - grace));
+          const bodies = Composite.allBodies(world);
+          for (const b of bodies) {
+            if (b.label === 'letter' && !b.isStatic && b !== state.dragging?.body) {
+              if (b.position.y < PIVOT.y - 120) {
+                Body.applyForce(b, b.position, { x: windForce * b.mass, y: 0 });
+              }
+            }
+          }
+        }
+
+        // HUD height readout — only touch the DOM when the value actually changes.
+        const hudKey = (state.cooldown > 0 ? 's' : 't') + '|' + hInfo.level;
+        if (hudKey !== lastHudKey) { lastHudKey = hudKey; refreshTurnSub(); }
+
+        // Graduated tilt brake — sheds tipping-direction momentum the further
+        // the rocker leans, so a counterweight always has a chance to win the
+        // fight. It never resists the return to level.
+        const tilt = rocker.angle;
+        const av2 = rocker.angularVelocity;
+        if (Math.abs(tilt) > TILT_BRAKE_START) {
+          const frac = Math.min(1, (Math.abs(tilt) - TILT_BRAKE_START) / (TILT_MAX - TILT_BRAKE_START));
+          const braking = TILT_BRAKE_MAX * frac;
+          if (tilt > 0 && av2 > 0)      Body.setAngularVelocity(rocker, Math.max(0, av2 - braking));
+          else if (tilt < 0 && av2 < 0) Body.setAngularVelocity(rocker, Math.min(0, av2 + braking));
+        }
+      }
+
+      // Wait for the stack to settle, then advance the turn.
+      if (state.cooldown > 0) {
+        state.cooldown -= STEP_MS;
+        if (state.cooldown <= 0) {
+          state.cooldown = 0;
+
+          // Rebalance bonus check:
+          const currentAngle = Math.abs(rocker.angle);
+          if (lastRockerAngle > 0.08 && currentAngle < 0.035) {
+            const owner = state.turn;
+            state.scores[owner] += 50;
+            addPopup(PIVOT.x, PIVOT.y - 100, 'REBALANCE BONUS! +50', PALETTE.gold);
+            blip('rebalance');
+          }
+          lastRockerAngle = currentAngle;
+
+          // Tower Height Milestone check — the tall peaks pay the most.
+          if (hInfo.level >= 5 && hInfo.level > maxMilestoneReached) {
+            maxMilestoneReached = hInfo.level;
+            const mBonus = 50 * (hInfo.level - 4);
+            state.scores[state.turn] += mBonus;
+            addPopup(PIVOT.x, PIVOT.y - 140, 'LEVEL ' + hInfo.level + ' TOWER! +' + mBonus, PALETTE.cream);
+            blip('milestone');
+          }
+
+          if (state.mode === 'duo') state.turn = 1 - state.turn;
+          spawnLetter();
+          updateHUD();
+        }
+      }
+
+      deathCheck();
+    }
+  }
+
+  // First letter to cross the death plane shatters — fragile, remember.
+  function deathCheck(){
+    const bodies = Composite.allBodies(world);
+    for (const b of bodies) {
+      if (b.label !== 'letter') continue;
+      if (b.isStatic) continue;                 // floating spawn letter
+      if (state.dragging && b === state.dragging.body) continue; // held
+      if (b.position.y - b.gameData.hh > DEATH_Y) {
+        smashLetter(b);
+        gameOver();
+        return;
+      }
+    }
+  }
+
+  function smashLetter(b){
+    shake = 10;
+    spawnSmash(b.position.x, b.position.y - b.gameData.hh * 0.4, letterColor(b));
+    blip('smash');
+    try { Composite.remove(world, b); } catch (e) { /* ignore */ }
+  }
+
+  // Whose fault? In duo mode: the current player is blamed once they have
+  // committed to their move; otherwise the fall is traced to the previous
+  // player whose placement destabilised the stack.
+  function blamePlayer(){
+    if (state.mode !== 'duo') return 0;
+    return state.touched ? state.turn : 1 - state.turn;
+  }
+
+  function gameOver(){
+    if (state.phase === 'over') return;
+    state.phase = 'over';
+    stopDragging();
+    state.active = null;
+
+    const loser = blamePlayer();
+    const winner = state.mode === 'duo' ? 1 - loser : null;
+
+    if (state.mode === 'solo' && state.scores[0] > state.best) {
+      state.best = state.scores[0];
+      try { localStorage.setItem(HS_KEY, String(state.best)); } catch (e) { /* ignore */ }
+    }
+
+    // Populate the game-over overlay.
+    const overTitle = document.getElementById('overTitle');
+    const overSub   = document.getElementById('overSub');
+    const overOver  = document.getElementById('overOverline');
+
+    if (state.mode === 'duo') {
+      overOver.textContent = 'the balance broke';
+      overTitle.textContent = 'PLAYER ' + (winner + 1) + ' WINS';
+      overTitle.style.color = winner === 0 ? PALETTE.gold : PALETTE.copper;
+      overSub.textContent = 'steady hands win the balance';
+    } else {
+      const isBest = state.scores[0] >= state.best && state.best > 0;
+      overOver.textContent = isBest ? 'new personal best' : 'the balance broke';
+      overTitle.textContent = String(state.scores[0]);
+      overTitle.style.color = PALETTE.cream;
+      overSub.textContent = 'letters stacked' + (isBest ? ' \u2014 best ' + state.best : ' \u2014 best ' + state.best);
+    }
+
+    showOverlay('over');
+    blip('over');
+    updateHUD();
+  }
+
+  /* ------------------------------------------------------------
+     8. RENDERING
+     ------------------------------------------------------------ */
+  let dpr = 1;
+  const rockerGrad = ctx.createLinearGradient(0, PIVOT.y - ROCKER_R, 0, PIVOT.y + 10);
+  rockerGrad.addColorStop(0, '#29241d');
+  rockerGrad.addColorStop(1, '#16130f');
+
+  function localToWorld(body, l){
+    const c = Math.cos(body.angle), s = Math.sin(body.angle);
+    return {
+      x: body.position.x + l.x * c - l.y * s,
+      y: body.position.y + l.x * s + l.y * c,
+    };
+  }
+
+  function letterColor(b){
+    if (state.mode === 'duo') return b.gameData.owner === 0 ? PALETTE.gold : PALETTE.copper;
+    return b.gameData.shade === 0 ? PALETTE.gold : '#d9c9a8';
+  }
+
+  function drawAmbient(){
+    // Soft glow behind the platform.
+    const g = ctx.createRadialGradient(PIVOT.x, PIVOT.y, 20, PIVOT.x, PIVOT.y, ROCKER_R * 2.2);
+    g.addColorStop(0, 'rgba(201,162,75,0.10)');
+    g.addColorStop(1, 'rgba(201,162,75,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function drawFloor(){
+    // Pedestal on the floor.
+    ctx.beginPath();
+    ctx.moveTo(PIVOT.x - 22, FLOOR_Y);
+    ctx.lineTo(PIVOT.x + 22, FLOOR_Y);
+    ctx.lineTo(PIVOT.x, FLOOR_Y - 16);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(201,162,75,0.10)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(201,162,75,0.35)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Floor line.
+    ctx.beginPath();
+    ctx.moveTo(24, FLOOR_Y);
+    ctx.lineTo(W - 24, FLOOR_Y);
+    ctx.strokeStyle = 'rgba(240,231,214,0.16)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Death line — the void below.
+    ctx.setLineDash([4, 7]);
+    ctx.beginPath();
+    ctx.moveTo(40, DEATH_Y);
+    ctx.lineTo(W - 40, DEATH_Y);
+    ctx.strokeStyle = 'rgba(201,162,75,0.28)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = 'rgba(201,162,75,0.38)';
+    ctx.font = FONTS.micro;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('THE VOID', W / 2, DEATH_Y - 9);
+  }
+
+  function drawPeg(now){
+    const pulse = 0.5 + 0.5 * Math.sin(now * 0.004);
+    ctx.save();
+    ctx.shadowColor = 'rgba(201,162,75,' + (0.35 + 0.15 * pulse) + ')';
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.arc(PIVOT.x, PIVOT.y, 9, 0, Math.PI * 2);
+    ctx.fillStyle = PALETTE.gold;
+    ctx.fill();
+    ctx.restore();
+
+    ctx.beginPath();
+    ctx.arc(PIVOT.x, PIVOT.y, 9, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(20,18,15,0.8)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  function drawRocker(){
+    const b = rocker;
+    ctx.save();
+
+    // The half-circle body itself.
+    ctx.beginPath();
+    const vs = b.vertices;
+    ctx.moveTo(vs[0].x, vs[0].y);
+    for (let i = 1; i < vs.length; i++) ctx.lineTo(vs[i].x, vs[i].y);
+    ctx.closePath();
+    ctx.fillStyle = rockerGrad;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(240,231,214,0.08)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Gold rim along the flat shelf. As the tower climbs and the base sheds
+    // stability, the rim warms from gold toward vermilion — an early warning
+    // that the balance is about to go badly.
+    const tension = 1 - Math.max(0, 1 - (state.towerLevel || 0) / GRACE_LEVELS);
+    const r = 201;
+    const g = Math.round(162 - tension * 108);
+    const blue = Math.round(75 - tension * 41);
+    const L = localToWorld(b, b.gameData.shelfL);
+    const R = localToWorld(b, b.gameData.shelfR);
+    ctx.shadowColor = 'rgba(' + r + ',' + g + ',' + blue + ',' + (0.55 + 0.2 * tension).toFixed(2) + ')';
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.moveTo(L.x, L.y);
+    ctx.lineTo(R.x, R.y);
+    ctx.strokeStyle = 'rgb(' + r + ',' + g + ',' + blue + ')';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawLetterBody(b, now){
+    const isActive = (b === state.active);
+
+    ctx.save();
+    ctx.translate(b.position.x, b.position.y);
+    ctx.rotate(b.angle);
+
+    // The letter glyph IS the shape — no squircle behind it.
+    if (isActive) {
+      // Breathing gold halo while it floats or is held.
+      ctx.shadowColor = 'rgba(201,162,75,' + (0.4 + 0.3 * Math.sin(now * 0.005)) + ')';
+      ctx.shadowBlur  = 22;
+    } else {
+      // Soft drop shadow so stacked letters read against the rocker.
+      ctx.shadowColor = 'rgba(0,0,0,0.5)';
+      ctx.shadowBlur  = 6;
+      ctx.shadowOffsetY = 2;
+    }
+
+    ctx.fillStyle = letterColor(b);
+
+    if (b.gameData.shape === 'path' && glyphFont) {
+      // Draw the exact outline used for collision.
+      const p = glyphFont.getPath(b.gameData.char, b.gameData.off.x, b.gameData.off.y, GLYPH_PX);
+      p.fill = ctx.fillStyle;
+      p.draw(ctx);
+
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur  = 0;
+      ctx.shadowOffsetY = 0;
+
+      // Thin outline keeps the glyph legible against the dark rocker.
+      ctx.strokeStyle = isActive ? 'rgba(201,162,75,0.9)' : 'rgba(242,236,223,0.28)';
+      ctx.lineWidth = 1.1;
+      ctx.stroke();
+    } else {
+      ctx.font = FONTS.glyph;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillText(b.gameData.char, b.gameData.gx, b.gameData.gy);
+
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur  = 0;
+      ctx.shadowOffsetY = 0;
+
+      // Thin outline keeps the glyph legible against the dark rocker.
+      ctx.strokeStyle = isActive ? 'rgba(201,162,75,0.9)' : 'rgba(242,236,223,0.28)';
+      ctx.lineWidth = 1.1;
+      ctx.strokeText(b.gameData.char, b.gameData.gx, b.gameData.gy);
+    }
+
+    // Owner marker in two-player mode.
+    if (state.mode === 'duo') {
+      ctx.beginPath();
+      ctx.arc(b.gameData.hw - 10, -b.gameData.hh + 10, 3, 0, Math.PI * 2);
+      ctx.fillStyle = letterColor(b);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  function drawLetters(now){
+    const bodies = Composite.allBodies(world);
+    for (const b of bodies) {
+      if (b.label === 'letter') drawLetterBody(b, now);
+    }
+  }
+
+  function drawSpawnHint(now){
+    if (state.phase !== 'play' || !state.active || state.dragging) return;
+    const a = state.active;
+    if (!a.isStatic) return;   // only while it floats
+
+    const alpha = 0.35 + 0.22 * Math.sin(now * 0.004);
+    ctx.save();
+    ctx.font = FONTS.micro;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = 'rgba(240,231,214,' + alpha.toFixed(3) + ')';
+    ctx.fillText('DRAG TO PLACE', a.position.x, a.position.y + a.gameData.hh + 24);
+
+    // Soft halo around the floating letter.
+    ctx.beginPath();
+    ctx.arc(a.position.x, a.position.y,
+            Math.max(a.gameData.hw, a.gameData.hh) * 1.4, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(201,162,75,' + (0.18 + 0.12 * Math.sin(now * 0.005)).toFixed(3) + ')';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawDragPivot(now){
+    if (!state.dragging || !state.dragging.body || !state.dragging.con) return;
+    const b = state.dragging.body;
+    const pt = localToWorld(b, state.dragging.con.pointB);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, 4.5, 0, Math.PI * 2);
+    ctx.fillStyle = PALETTE.gold;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(20,18,15,0.9)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawAimGuide(){
+    if (!state.dragging || !state.dragging.body) return;
+    const b = state.dragging.body;
+    ctx.save();
+    ctx.setLineDash([4, 6]);
+    ctx.beginPath();
+    ctx.moveTo(b.position.x, b.position.y + b.gameData.hh);
+    ctx.lineTo(b.position.x, PIVOT.y - 10);
+    ctx.strokeStyle = 'rgba(201,162,75,0.35)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawTowerHeightLine(){
+    if (state.phase !== 'play' || !state.towerPeakY || state.towerPeakY >= PIVOT.y - 40) return;
+    ctx.save();
+    ctx.setLineDash([3, 5]);
+    ctx.beginPath();
+    ctx.moveTo(30, state.towerPeakY);
+    ctx.lineTo(W - 30, state.towerPeakY);
+    ctx.strokeStyle = 'rgba(201,162,75,0.4)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.font = FONTS.micro;
+    ctx.fillStyle = PALETTE.gold;
+    ctx.textAlign = 'left';
+    ctx.fillText('PEAK L' + (state.towerLevel || 1), 34, state.towerPeakY - 5);
+    ctx.restore();
+  }
+
+  function drawBalanceHint(){
+    if (state.phase !== 'play') return;
+    const a = rocker.angle;
+    if (Math.abs(a) < 0.10) return;   // it's fine, don't nag
+    // The high side is opposite the tilt — that's where the player must add weight.
+    const corner = localToWorld(rocker, a > 0 ? rocker.gameData.shelfL : rocker.gameData.shelfR);
+    const alpha = 0.55 + 0.3 * Math.sin(performance.now() * 0.006);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = PALETTE.gold;
+    ctx.translate(corner.x, corner.y);
+    ctx.beginPath();
+    ctx.moveTo(0, -18);
+    ctx.lineTo(-7, -7);
+    ctx.lineTo(7, -7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.font = FONTS.micro;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('ADD WEIGHT', 0, 5);
+    ctx.restore();
+  }
+
+  function render(now){
+    updateJuice(STEP_MS);
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+
+    if (shake > 0) {
+      ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+    }
+
+    drawAmbient();
+    drawFloor();
+    drawPeg(now);
+    drawRocker();
+    drawLetters(now);
+    drawSpawnHint(now);
+    drawAimGuide();
+    drawTowerHeightLine();
+    drawBalanceHint();
+    drawDragPivot(now);
+    drawJuice();
+  }
+  const hudTurn   = document.getElementById('hudTurn');
+  const hudTurnSub = document.getElementById('hudTurnSub');
+  const hudScore  = document.getElementById('hudScore');
+  const hudScoreLabel = document.getElementById('hudScoreLabel');
+  const hudBest   = document.getElementById('hudBest');
+
+  const menuEl = document.getElementById('menu');
+  const pauseEl = document.getElementById('pause');
+  const overEl = document.getElementById('over');
+
+  function showOverlay(id){
+    menuEl.classList.toggle('show', id === 'menu');
+    pauseEl.classList.toggle('show', id === 'pause');
+    overEl.classList.toggle('show', id === 'over');
+  }
+
+  function refreshTurnSub(){
+    if (state.mode !== 'solo' || state.phase !== 'play') return;
+    const h = state.towerLevel;
+    const verb = state.cooldown > 0 ? 'the stack holds' : 'steady hands';
+    hudTurnSub.textContent = h >= 1 ? 'HEIGHT L' + h + ' \u00b7 ' + verb : verb;
+  }
+
+  function updateHUD(){
+    if (state.mode === 'solo') {
+      hudMode.textContent = 'SOLO RUN';
+      hudScore.textContent = String(state.scores[0]);
+      hudScoreLabel.textContent = 'SCORE';
+      hudBest.style.display = '';
+      hudBest.textContent = 'BEST ' + state.best;
+      hudTurn.className = 'hud-turn';
+      if (state.phase === 'play') {
+        hudTurn.textContent = state.cooldown > 0 ? 'SETTLING' : 'YOUR TURN';
+        refreshTurnSub();
+      } else if (state.phase === 'over') {
+        hudTurn.textContent = 'REST';
+        hudTurnSub.textContent = 'the balance broke';
+      }
+    } else {
+      hudMode.textContent = 'TWO PLAYERS';
+      hudScore.textContent = state.scores[0] + ' \u00b7 ' + state.scores[1];
+      hudScoreLabel.textContent = 'P1 \u00b7 P2';
+      hudBest.style.display = 'none';
+      hudTurn.className = 'hud-turn ' + (state.turn === 0 ? 'hud-p1' : 'hud-p2');
+      if (state.phase === 'play') {
+        hudTurn.textContent = state.cooldown > 0 ? 'SETTLING' : 'PLAYER ' + (state.turn + 1);
+        hudTurnSub.textContent = state.cooldown > 0 ? 'the stack holds' : 'place a letter';
+      } else if (state.phase === 'over') {
+        hudTurn.textContent = 'GAME OVER';
+        hudTurnSub.textContent = 'the balance broke';
+      }
+    }
+  }
+
+  function startGame(mode){
+    state.mode = mode;
+    state.turn = 0;
+    state.scores = [0, 0];
+    state.cooldown = 0;
+    state.dragging = null;
+    state.active = null;
+    state.paused = false;
+    state.touched = false;
+    state.phase = 'play';
+
+    peakLevelSeen = 0;
+    maxMilestoneReached = 0;
+    lastRockerAngle = 0;
+    lastHudKey = '';
+    state.towerLevel = 0;
+
+    try { state.best = parseInt(localStorage.getItem(HS_KEY), 10) || 0; } catch (e) { state.best = 0; }
+
+    buildLevel();
+    spawnLetter();
+    updateHUD();
+    showOverlay('');
+    blip('start');
+  }
+
+  function toMenu(){
+    state.phase = 'menu';
+    state.active = null;
+    state.dragging = null;
+    buildLevel();          // clean backdrop rocker behind the menu
+    updateHUD();
+    showOverlay('menu');
+  }
+
+  function togglePause(){
+    if (state.phase !== 'play') return;
+    state.paused = !state.paused;
+    showOverlay(state.paused ? 'pause' : '');
+    updateHUD();
+  }
+
+  function toggleMute(){
+    muted = !muted;
+    const btn = document.getElementById('btnSound');
+    btn.classList.toggle('muted', muted);
+  }
+
+  /* Collision audio — small thocks when letters hit hard. */
+  Matter.Events.on(engine, 'collisionStart', function (event) {
+    if (muted) return;
+    const now = performance.now();
+    if (now - lastImpactAt < 90) return;
+    for (const pair of event.pairs) {
+      if (pair.collision.speed > 1.6 &&
+          (pair.bodyA.label === 'letter' || pair.bodyB.label === 'letter')) {
+        lastImpactAt = now;
+        blip('thud');
+        break;
+      }
+    }
+  });
+
+  /* ------------------------------------------------------------
+     MAIN LOOP — fixed timestep physics, variable render
+     ------------------------------------------------------------ */
+  const STEP_MS = 1000 / 60;
+  let last = performance.now();
+  let acc = 0;
+
+  function frame(now){
+    requestAnimationFrame(frame);
+
+    const dt = Math.min(now - last, 250);   // clamp long stalls
+    last = now;
+
+    if (!state.paused) {
+      // Menu idle: gently sway the rocker for a live backdrop.
+      if (state.phase === 'menu') {
+        Body.setAngle(rocker, 0.09 * Math.sin(now * 0.0011));
+        Body.setAngularVelocity(rocker, 0);
+      }
+      acc += dt;
+      let guard = 0;
+      while (acc >= STEP_MS && guard < 4) {   // avoid spiral of death
+        try {
+          Engine.update(engine, STEP_MS);
+          postStep();
+        } catch (err) {
+          // Never let a physics error kill the game.
+          console.error('physics step error', err);
+          acc = 0;
+          break;
+        }
+        acc -= STEP_MS;
+        guard++;
+      }
+      if (acc >= STEP_MS) acc = 0;
+    }
+
+    render(now);
+  }
+
+  /* ------------------------------------------------------------
+     RESIZE — crisp rendering at any DPI
+     ------------------------------------------------------------ */
+  function resize(){
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width  = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+  }
+
+  /* ------------------------------------------------------------
+     WIRING
+     ------------------------------------------------------------ */
+  document.querySelectorAll('.big-btn[data-mode]').forEach(function (btn) {
+    btn.addEventListener('click', function () { startGame(btn.dataset.mode); });
+  });
+  document.getElementById('btnAgain').addEventListener('click', function () {
+    startGame(state.mode);
+  });
+  document.getElementById('btnMenu').addEventListener('click', toMenu);
+  document.getElementById('btnPause').addEventListener('click', togglePause);
+  document.getElementById('btnSound').addEventListener('click', toggleMute);
+
+  window.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
+      if (state.phase === 'play') togglePause();
+    }
+    if (e.key === 'r' || e.key === 'R') {
+      if (state.phase === 'play' || state.phase === 'over') startGame(state.mode);
+    }
+  });
+
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('pointercancel', onPointerUp);
+  canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  // First gesture unlocks audio.
+  document.addEventListener('pointerdown', ensureAudio, { once: true });
+
+  window.addEventListener('resize', resize);
+  window.addEventListener('blur', function () {
+    if (state.phase === 'play' && !state.paused) togglePause();
+  });
+
+  /* ------------------------------------------------------------
+     BOOT
+     ------------------------------------------------------------ */
+  function boot(){
+    resize();
+
+    if (typeof Matter === 'undefined') {
+      document.querySelector('#menu .overline').textContent =
+        'error — physics library failed to load';
+      return;
+    }
+    try { state.best = parseInt(localStorage.getItem(HS_KEY), 10) || 0; } catch (e) { state.best = 0; }
+
+    buildLevel();
+    loadGlyphFont();
+    updateHUD();
+    requestAnimationFrame(frame);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+
+})();
+</script>
+</body>
+</html>
